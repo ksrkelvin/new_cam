@@ -1,0 +1,7 @@
+.cache/
+.git/
+.agents/
+.codex/
+tmp/
+bin/
+.env

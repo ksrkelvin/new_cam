@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sala {{.Room.Code}} | We Cam</title>
+  <link rel="stylesheet" href="/static/css/app.css?v=20260912-2">
+</head>
+<body data-room-code="{{.Room.Code}}">
+  <main class="room-shell">
+    <header class="room-header">
+      <a href="/" class="brand">We Cam</a>
+      <div class="room-code">
+        <span>Sala</span>
+        <strong>{{.Room.Code}}</strong>
+      </div>
+      <div class="room-code">
+        <span>Pessoas</span>
+        <strong id="participant-count">1/10</strong>
+      </div>
+      <button type="button" id="copy-code">Copiar codigo</button>
+      <button type="button" id="leave-room" class="danger-button">Sair</button>
+    </header>
+
+    <section class="stage" id="stage">
+      <div class="video-frame" data-peer-id="local">
+        <video id="local-video" autoplay muted playsinline></video>
+        <span class="camera-label">
+          <span id="local-mic-status" class="mic-icon is-on" aria-label="Microfone ligado">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3Z"></path>
+              <path d="M19 11a7 7 0 0 1-14 0"></path>
+              <path d="M12 18v3"></path>
+              <path d="M8 21h8"></path>
+            </svg>
+          </span>
+          <span id="local-state">Camera local</span>
+        </span>
+      </div>
+    </section>
+
+    <footer class="controls">
+      <button type="button" id="toggle-camera">Desligar camera</button>
+      <button type="button" id="toggle-mic">Desligar microfone</button>
+    </footer>
+  </main>
+  <script src="/static/js/room.js?v=20260912-2"></script>
+</body>
+</html>

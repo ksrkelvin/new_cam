@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>We Cam</title>
+  <link rel="stylesheet" href="/static/css/app.css?v=20260912-2">
+</head>
+<body>
+  <main class="home-shell">
+    <section class="home-panel">
+      <p class="eyebrow">We Cam</p>
+      <h1>Compartilhe sua camera em uma sala privada.</h1>
+      <p class="subtitle">Crie uma sala ou entre com um codigo existente para iniciar uma chamada simples direto no navegador.</p>
+
+      {{if .Error}}
+      <p class="alert">{{.Error}}</p>
+      {{end}}
+
+      <div class="actions-grid">
+        <form method="post" action="/rooms" class="action-card">
+          <h2>Nova sala</h2>
+          <p>Gera um codigo curto para compartilhar.</p>
+          <button type="submit">Criar sala</button>
+        </form>
+
+        <form method="post" action="/rooms/join" class="action-card">
+          <h2>Entrar</h2>
+          <label for="code">Codigo da sala</label>
+          <input id="code" name="code" type="text" maxlength="12" autocomplete="off" placeholder="ABC123" required>
+          <button type="submit">Entrar na sala</button>
+        </form>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
