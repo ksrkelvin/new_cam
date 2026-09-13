@@ -3,7 +3,11 @@ include .env
 export
 endif
 
-.PHONY: run db-up db-down migrate-up migrate-down sqlc test
+.DEFAULT_GOAL := dev
+
+.PHONY: dev run db-up db-down migrate-up migrate-down sqlc test
+
+dev: db-up migrate-up run
 
 run:
 	go run ./cmd/wecam
@@ -15,10 +19,10 @@ db-down:
 	docker compose down
 
 migrate-up:
-	migrate -path db/migrations -database "$(DATABASE_URL)" up
+	docker compose run --rm migrate -path /migrations -database "$(DOCKER_DATABASE_URL)" up
 
 migrate-down:
-	migrate -path db/migrations -database "$(DATABASE_URL)" down
+	docker compose run --rm migrate -path /migrations -database "$(DOCKER_DATABASE_URL)" down
 
 sqlc:
 	sqlc generate

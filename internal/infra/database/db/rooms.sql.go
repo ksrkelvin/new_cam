@@ -4,21 +4,52 @@ package db
 
 import "context"
 
-const createRoom = `-- name: CreateRoom :one
-INSERT INTO rooms (code)
-VALUES ($1)
-RETURNING id, code, created_at
+const approveRoomGuest = `-- name: ApproveRoomGuest :exec
+INSERT INTO room_approved_guests (room_code, guest_token)
+VALUES ($1, $2)
+ON CONFLICT (room_code, guest_token) DO NOTHING
 `
 
-func (q *Queries) CreateRoom(ctx context.Context, code string) (Room, error) {
-	row := q.db.QueryRow(ctx, createRoom, code)
+type ApproveRoomGuestParams struct {
+	RoomCode   string
+	GuestToken string
+}
+
+func (q *Queries) ApproveRoomGuest(ctx context.Context, arg ApproveRoomGuestParams) error {
+	_, err := q.db.Exec(ctx, approveRoomGuest, arg.RoomCode, arg.GuestToken)
+	return err
+}
+
+const createRoom = `-- name: CreateRoom :one
+INSERT INTO rooms (code, owner_token)
+VALUES ($1, $2)
+RETURNING id, code, owner_token, last_empty_at, created_at
+`
+
+type CreateRoomParams struct {
+	Code       string
+	OwnerToken string
+}
+
+func (q *Queries) CreateRoom(ctx context.Context, arg CreateRoomParams) (Room, error) {
+	row := q.db.QueryRow(ctx, createRoom, arg.Code, arg.OwnerToken)
 	var room Room
-	err := row.Scan(&room.ID, &room.Code, &room.CreatedAt)
+	err := row.Scan(&room.ID, &room.Code, &room.OwnerToken, &room.LastEmptyAt, &room.CreatedAt)
 	return room, err
 }
 
+const deleteRoom = `-- name: DeleteRoom :exec
+DELETE FROM rooms
+WHERE code = $1
+`
+
+func (q *Queries) DeleteRoom(ctx context.Context, code string) error {
+	_, err := q.db.Exec(ctx, deleteRoom, code)
+	return err
+}
+
 const findRoomByCode = `-- name: FindRoomByCode :one
-SELECT id, code, created_at
+SELECT id, code, owner_token, last_empty_at, created_at
 FROM rooms
 WHERE code = $1
 `
@@ -26,6 +57,63 @@ WHERE code = $1
 func (q *Queries) FindRoomByCode(ctx context.Context, code string) (Room, error) {
 	row := q.db.QueryRow(ctx, findRoomByCode, code)
 	var room Room
-	err := row.Scan(&room.ID, &room.Code, &room.CreatedAt)
+	err := row.Scan(&room.ID, &room.Code, &room.OwnerToken, &room.LastEmptyAt, &room.CreatedAt)
 	return room, err
+}
+
+const isRoomGuestApproved = `-- name: IsRoomGuestApproved :one
+SELECT EXISTS (
+    SELECT 1
+    FROM room_approved_guests
+    WHERE room_code = $1 AND guest_token = $2
+)
+`
+
+type IsRoomGuestApprovedParams struct {
+	RoomCode   string
+	GuestToken string
+}
+
+func (q *Queries) IsRoomGuestApproved(ctx context.Context, arg IsRoomGuestApprovedParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isRoomGuestApproved, arg.RoomCode, arg.GuestToken)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const markRoomEmpty = `-- name: MarkRoomEmpty :exec
+UPDATE rooms
+SET last_empty_at = now()
+WHERE code = $1
+`
+
+func (q *Queries) MarkRoomEmpty(ctx context.Context, code string) error {
+	_, err := q.db.Exec(ctx, markRoomEmpty, code)
+	return err
+}
+
+const markRoomOccupied = `-- name: MarkRoomOccupied :exec
+UPDATE rooms
+SET last_empty_at = NULL
+WHERE code = $1
+`
+
+func (q *Queries) MarkRoomOccupied(ctx context.Context, code string) error {
+	_, err := q.db.Exec(ctx, markRoomOccupied, code)
+	return err
+}
+
+const revokeRoomGuest = `-- name: RevokeRoomGuest :exec
+DELETE FROM room_approved_guests
+WHERE room_code = $1 AND guest_token = $2
+`
+
+type RevokeRoomGuestParams struct {
+	RoomCode   string
+	GuestToken string
+}
+
+func (q *Queries) RevokeRoomGuest(ctx context.Context, arg RevokeRoomGuestParams) error {
+	_, err := q.db.Exec(ctx, revokeRoomGuest, arg.RoomCode, arg.GuestToken)
+	return err
 }

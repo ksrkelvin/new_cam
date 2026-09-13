@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sala {{.Room.Code}} | We Cam</title>
-  <link rel="stylesheet" href="/static/css/app.css?v=20260912-6">
+  <link rel="stylesheet" href="/static/css/app.css?v=20260913-5">
 </head>
-<body data-room-code="{{.Room.Code}}">
+<body data-room-code="{{.Room.Code}}" data-is-owner="{{.IsOwner}}">
   <main class="room-shell">
     <header class="room-header">
       <a href="/" class="brand">We Cam</a>
@@ -18,7 +18,10 @@
         <span>Pessoas</span>
         <strong id="participant-count">1/10</strong>
       </div>
-      <button type="button" id="copy-code">Copiar codigo</button>
+      {{if .IsOwner}}
+      <button type="button" id="toggle-owner-panel" class="secondary-button" aria-expanded="false">Gerenciar <span id="pending-badge" hidden>0</span></button>
+      {{end}}
+      <button type="button" id="share-room">Compartilhar sala</button>
       <button type="button" id="leave-room" class="danger-button">Sair</button>
     </header>
 
@@ -43,7 +46,30 @@
       <button type="button" id="toggle-camera">Desligar camera</button>
       <button type="button" id="toggle-mic">Desligar microfone</button>
     </footer>
+
+    <aside class="owner-panel" id="owner-panel" aria-hidden="true">
+      <h2>Participantes</h2>
+      <div id="participant-list" class="participant-list"></div>
+      <h2>Aguardando entrada</h2>
+      <div id="pending-list" class="pending-list"></div>
+    </aside>
+
+    <section class="lobby" id="lobby" hidden>
+      <div class="lobby-panel">
+        <h1>Pronto para entrar?</h1>
+        <p>Confira camera e microfone antes de pedir autorizacao ao criador da sala.</p>
+        <video id="lobby-video" autoplay muted playsinline></video>
+        <label for="guest-name">Seu nome</label>
+        <input id="guest-name" type="text" maxlength="40" autocomplete="name" placeholder="Convidado">
+        <div class="lobby-actions">
+          <button type="button" id="request-entry">Entrar</button>
+          <button type="button" id="lobby-toggle-camera">Desligar camera</button>
+          <button type="button" id="lobby-toggle-mic">Desligar microfone</button>
+        </div>
+        <p class="lobby-status" id="lobby-status">Aguardando sua confirmacao.</p>
+      </div>
+    </section>
   </main>
-  <script src="/static/js/room.js?v=20260912-6"></script>
+  <script src="/static/js/room.js?v=20260913-5"></script>
 </body>
 </html>

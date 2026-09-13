@@ -2,7 +2,9 @@ package httpserver
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -24,9 +26,11 @@ func (h *RoomHandler) Home(ctx *gin.Context) {
 func (h *RoomHandler) Create(ctx *gin.Context) {
 	createdRoom, err := h.service.Create(ctx.Request.Context())
 	if err != nil {
+		slog.Error("create room failed", "error", err)
 		ctx.HTML(http.StatusInternalServerError, "home.html", gin.H{"Error": "Nao foi possivel criar a sala."})
 		return
 	}
+	setOwnerCookie(ctx, createdRoom.Code, createdRoom.OwnerToken)
 	ctx.Redirect(http.StatusSeeOther, "/rooms/"+createdRoom.Code)
 }
 
@@ -37,6 +41,7 @@ func (h *RoomHandler) Join(ctx *gin.Context) {
 		return
 	}
 	if err != nil {
+		slog.Error("join room failed", "error", err)
 		ctx.HTML(http.StatusInternalServerError, "home.html", gin.H{"Error": "Erro ao procurar sala."})
 		return
 	}
@@ -50,8 +55,28 @@ func (h *RoomHandler) Show(ctx *gin.Context) {
 		return
 	}
 	if err != nil {
+		slog.Error("show room failed", "error", err)
 		ctx.HTML(http.StatusInternalServerError, "home.html", gin.H{"Error": "Erro ao abrir sala."})
 		return
 	}
-	ctx.HTML(http.StatusOK, "room.html", gin.H{"Room": joinedRoom})
+	ownerToken, _ := ctx.Cookie(ownerCookieName(joinedRoom.Code))
+	ctx.HTML(http.StatusOK, "room.html", gin.H{
+		"Room":    joinedRoom,
+		"IsOwner": ownerToken == joinedRoom.OwnerToken,
+	})
+}
+
+func setOwnerCookie(ctx *gin.Context, roomCode string, ownerToken string) {
+	http.SetCookie(ctx.Writer, &http.Cookie{
+		Name:     ownerCookieName(roomCode),
+		Value:    ownerToken,
+		Path:     "/",
+		Expires:  time.Now().Add(30 * 24 * time.Hour),
+		MaxAge:   30 * 24 * 60 * 60,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func ownerCookieName(roomCode string) string {
+	return "wecam_owner_" + roomCode
 }

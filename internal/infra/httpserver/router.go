@@ -25,14 +25,27 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 
 	roomService := room.NewService(database.NewRoomRepository(pool))
 	handler := NewRoomHandler(roomService)
-	hub := realtime.NewHub()
+	hub := realtime.NewHub(roomService)
 
 	router.GET("/", handler.Home)
 	router.POST("/rooms", handler.Create)
 	router.POST("/rooms/join", handler.Join)
 	router.GET("/rooms/:code", handler.Show)
 	router.GET("/ws/rooms/:code", func(ctx *gin.Context) {
-		hub.Serve(ctx.Writer, ctx.Request, room.NormalizeCode(ctx.Param("code")))
+		code := room.NormalizeCode(ctx.Param("code"))
+		joinedRoom, err := roomService.Join(ctx.Request.Context(), code)
+		if err != nil {
+			ctx.Status(http.StatusNotFound)
+			return
+		}
+		ownerToken, _ := ctx.Cookie(ownerCookieName(code))
+		guestToken := ctx.Query("guest_token")
+		guestApproved, err := roomService.IsGuestApproved(ctx.Request.Context(), joinedRoom.Code, guestToken)
+		if err != nil {
+			ctx.Status(http.StatusInternalServerError)
+			return
+		}
+		hub.Serve(ctx.Writer, ctx.Request, joinedRoom.Code, ownerToken == joinedRoom.OwnerToken, guestToken, guestApproved)
 	})
 
 	_ = cfg

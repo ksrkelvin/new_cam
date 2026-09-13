@@ -10,19 +10,26 @@ import (
 )
 
 type Client struct {
-	id       string
-	roomCode string
-	conn     *websocket.Conn
-	hub      *Hub
-	writeMu  sync.Mutex
+	id          string
+	roomCode    string
+	conn        *websocket.Conn
+	hub         *Hub
+	writeMu     sync.Mutex
+	isOwner     bool
+	isApproved  bool
+	guestToken  string
+	displayName string
 }
 
-func NewClient(roomCode string, conn *websocket.Conn, hub *Hub) *Client {
+func NewClient(roomCode string, conn *websocket.Conn, hub *Hub, isOwner bool, guestToken string, isGuestApproved bool) *Client {
 	return &Client{
-		id:       randomID(),
-		roomCode: roomCode,
-		conn:     conn,
-		hub:      hub,
+		id:         randomID(),
+		roomCode:   roomCode,
+		conn:       conn,
+		hub:        hub,
+		isOwner:    isOwner,
+		isApproved: isOwner || isGuestApproved,
+		guestToken: guestToken,
 	}
 }
 
@@ -40,9 +47,7 @@ func (c *Client) Run() {
 		}
 		message.From = c.id
 		c.hub.logger.Debug("signal received", "room", c.roomCode, "from", c.id, "to", message.To, "type", message.Type)
-		c.hub.mu.RLock()
-		c.hub.broadcast(c, message)
-		c.hub.mu.RUnlock()
+		c.hub.handle(c, message)
 	}
 }
 
