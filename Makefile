@@ -5,9 +5,12 @@ endif
 
 .DEFAULT_GOAL := dev
 
-.PHONY: dev run db-up db-down migrate-up migrate-down sqlc test
+.PHONY: dev debug run db-up db-down migrate-up migrate-down sqlc test
 
 dev: db-up migrate-up run
+
+debug:
+	docker compose up --build app prometheus grafana
 
 run:
 	go run ./cmd/wecam

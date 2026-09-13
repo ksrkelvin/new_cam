@@ -25,11 +25,13 @@ const lobbyToggleMic = document.querySelector("#lobby-toggle-mic");
 const guestTokenKey = `wecam_guest_${roomCode}`;
 const guestNameKey = `wecam_guest_name_${roomCode}`;
 const guestToken = isOwner ? "" : getOrCreateGuestToken();
+const clientLogID = getOrCreateClientLogID();
 
 const socketProtocol = window.location.protocol === "https:" ? "wss" : "ws";
 const socketURL = new URL(`${socketProtocol}://${window.location.host}/ws/rooms/${roomCode}`);
 if (guestToken) socketURL.searchParams.set("guest_token", guestToken);
 const socket = new WebSocket(socketURL);
+logClientEvent("info", "room-script-loaded", { isOwner, roomCode, connection: connectionInfo() });
 
 const peerConfig = {
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
@@ -53,6 +55,7 @@ if (!isOwner) {
 
 socket.addEventListener("message", async (event) => {
   const message = JSON.parse(event.data);
+  logClientEvent("debug", "websocket-message", { type: message.type, from: message.from, to: message.to });
 
   if (message.type === "room-full") {
     showRoomFull();
@@ -154,12 +157,47 @@ socket.addEventListener("message", async (event) => {
   if (message.type === "candidate") await entry.connection.addIceCandidate(message.data);
 });
 
+socket.addEventListener("open", () => {
+  logClientEvent("info", "websocket-open", { url: socketURL.pathname, connection: connectionInfo() });
+});
+
+socket.addEventListener("close", (event) => {
+  logClientEvent("warn", "websocket-close", {
+    code: event.code,
+    reason: event.reason,
+    wasClean: event.wasClean,
+    connection: connectionInfo(),
+  });
+});
+
+socket.addEventListener("error", () => {
+  logClientEvent("error", "websocket-error", { readyState: socket.readyState, connection: connectionInfo() });
+});
+
 async function ensureMedia() {
   if (localStream) return;
-  localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: {
+        noiseSuppression: true,
+        echoCancellation: true,
+        autoGainControl: true,
+      },
+    });
+  } catch (error) {
+    logClientEvent("error", "media-error", { name: error.name, message: error.message });
+    throw error;
+  }
   micEnabled = localStream.getAudioTracks()[0]?.enabled ?? false;
   localVideo.srcObject = localStream;
   lobbyVideo.srcObject = localStream;
+  logClientEvent("info", "media-ready", {
+    audioTracks: localStream.getAudioTracks().length,
+    videoTracks: localStream.getVideoTracks().length,
+    audioSettings: localStream.getAudioTracks()[0]?.getSettings?.() || {},
+    videoSettings: localStream.getVideoTracks()[0]?.getSettings?.() || {},
+  });
 }
 
 async function createPeer(peerID, shouldOffer) {
@@ -188,7 +226,29 @@ async function createPeer(peerID, shouldOffer) {
   };
 
   connection.onconnectionstatechange = () => {
+    logClientEvent("info", "peer-connection-state", {
+      peerID,
+      state: connection.connectionState,
+      iceConnectionState: connection.iceConnectionState,
+      iceGatheringState: connection.iceGatheringState,
+      signalingState: connection.signalingState,
+    });
     if (["failed", "closed"].includes(connection.connectionState)) removePeer(peerID);
+  };
+
+  connection.oniceconnectionstatechange = () => {
+    logClientEvent("info", "peer-ice-state", {
+      peerID,
+      iceConnectionState: connection.iceConnectionState,
+      connectionState: connection.connectionState,
+    });
+  };
+
+  connection.onicegatheringstatechange = () => {
+    logClientEvent("debug", "peer-ice-gathering-state", {
+      peerID,
+      iceGatheringState: connection.iceGatheringState,
+    });
   };
 
   if (shouldOffer) {
@@ -460,6 +520,7 @@ toggleOwnerPanel?.addEventListener("click", () => {
 window.addEventListener("beforeunload", leaveCurrentRoom);
 
 function leaveCurrentRoom() {
+  logClientEvent("info", "leave-room", { readyState: socket.readyState, peers: peers.size });
   for (const peerID of Array.from(peers.keys())) removePeer(peerID);
   for (const track of localStream?.getTracks() || []) track.stop();
   if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
@@ -483,6 +544,18 @@ function getOrCreateGuestToken() {
   return token;
 }
 
+function getOrCreateClientLogID() {
+  const key = "wecam_client_log_id";
+  const existingID = localStorage.getItem(key);
+  if (existingID) return existingID;
+
+  const bytes = new Uint8Array(12);
+  crypto.getRandomValues(bytes);
+  const id = Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+  localStorage.setItem(key, id);
+  return id;
+}
+
 function localDisplayName() {
   if (isOwner) return "Criador";
   return localStorage.getItem(guestNameKey) || guestName.value.trim() || "Voce";
@@ -503,4 +576,38 @@ function updatePeerLabel(peerID) {
   const entry = peers.get(peerID);
   if (!entry) return;
   entry.tile.name.textContent = peerNames.get(peerID) || `Convidado ${shortID(peerID)}`;
+}
+
+function logClientEvent(level, event, data = {}) {
+  const payload = JSON.stringify({
+    room: roomCode,
+    clientId: clientLogID,
+    level,
+    event,
+    userAgent: navigator.userAgent,
+    data,
+  });
+
+  if (navigator.sendBeacon) {
+    const blob = new Blob([payload], { type: "application/json" });
+    if (navigator.sendBeacon("/client-logs", blob)) return;
+  }
+
+  fetch("/client-logs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: payload,
+    keepalive: true,
+  }).catch(() => {});
+}
+
+function connectionInfo() {
+  const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  if (!connection) return {};
+  return {
+    effectiveType: connection.effectiveType,
+    downlink: connection.downlink,
+    rtt: connection.rtt,
+    saveData: connection.saveData,
+  };
 }

@@ -9,6 +9,8 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
+
+	"we_cam/internal/infra/observability"
 )
 
 const MaxRoomParticipants = 10
@@ -65,6 +67,7 @@ func (h *Hub) Serve(writer http.ResponseWriter, request *http.Request, roomCode 
 	}
 
 	client := NewClient(roomCode, conn, h, isOwner, guestToken, isGuestApproved)
+	observability.IncWebsocketConnections()
 	peers, err := h.register(client)
 	if errors.Is(err, ErrRoomFull) {
 		h.logger.Warn("room full", "room", roomCode, "limit", MaxRoomParticipants)
@@ -114,6 +117,7 @@ func (h *Hub) register(client *Client) ([]string, error) {
 
 	if !client.isApproved {
 		room.pending[client] = struct{}{}
+		h.updateMetricsLocked()
 		h.sendPendingListLocked(client.roomCode)
 		return nil, nil
 	}
@@ -125,6 +129,7 @@ func (h *Hub) register(client *Client) ([]string, error) {
 
 	room.participants[client] = struct{}{}
 	h.markOccupied(client.roomCode)
+	h.updateMetricsLocked()
 	h.logger.Info(
 		"client joined room",
 		"room", client.roomCode,
@@ -147,9 +152,11 @@ func (h *Hub) unregister(client *Client) {
 	_, wasParticipant := room.participants[client]
 	delete(room.participants, client)
 	delete(room.pending, client)
+	observability.IncWebsocketDisconnects()
 	if len(room.participants) == 0 && len(room.pending) == 0 {
 		delete(h.rooms, client.roomCode)
 		h.markEmpty(client.roomCode)
+		h.updateMetricsLocked()
 		h.logger.Info("client left room", "room", client.roomCode, "client", client.id, "participants", 0)
 		return
 	}
@@ -157,6 +164,7 @@ func (h *Hub) unregister(client *Client) {
 	if wasParticipant {
 		h.broadcast(client, signalMessage{Type: "peer-left", From: client.id})
 	}
+	h.updateMetricsLocked()
 	h.sendPendingListLocked(client.roomCode)
 }
 
@@ -224,12 +232,14 @@ func (h *Hub) approveLocked(owner *Client, pendingID string) {
 		delete(room.pending, pendingClient)
 		pendingClient.isApproved = true
 		h.approveGuest(owner.roomCode, pendingClient.guestToken)
+		observability.IncGuestsApproved()
 		peers := make([]string, 0, len(room.participants))
 		for existingClient := range room.participants {
 			peers = append(peers, existingClient.id)
 		}
 		room.participants[pendingClient] = struct{}{}
 		h.markOccupied(owner.roomCode)
+		h.updateMetricsLocked()
 		_ = pendingClient.send(signalMessage{Type: "approved", From: pendingClient.id, Peers: peers, Data: mustJSON(map[string]any{
 			"peers": h.peerInfosLocked(room, pendingClient),
 			"name":  clientName(pendingClient),
@@ -248,6 +258,7 @@ func (h *Hub) kickLocked(owner *Client, clientID string) {
 	for pendingClient := range room.pending {
 		if pendingClient.id == clientID {
 			delete(room.pending, pendingClient)
+			observability.IncGuestsRejected()
 			_ = pendingClient.send(signalMessage{Type: "rejected"})
 			_ = pendingClient.conn.Close()
 			h.sendPendingListLocked(owner.roomCode)
@@ -257,6 +268,7 @@ func (h *Hub) kickLocked(owner *Client, clientID string) {
 	for participant := range room.participants {
 		if participant.id == clientID && participant != owner {
 			delete(room.participants, participant)
+			observability.IncGuestsKicked()
 			h.revokeGuest(owner.roomCode, participant.guestToken)
 			_ = participant.send(signalMessage{Type: "kicked"})
 			_ = participant.conn.Close()
@@ -264,6 +276,7 @@ func (h *Hub) kickLocked(owner *Client, clientID string) {
 			if len(room.participants) == 0 && len(room.pending) == 0 {
 				h.markEmpty(owner.roomCode)
 			}
+			h.updateMetricsLocked()
 			return
 		}
 	}
@@ -368,4 +381,17 @@ func (h *Hub) revokeGuest(roomCode string, guestToken string) {
 	if err := h.activity.RevokeGuest(context.Background(), roomCode, guestToken); err != nil {
 		h.logger.Warn("revoke guest failed", "room", roomCode, "error", err)
 	}
+}
+
+func (h *Hub) updateMetricsLocked() {
+	rooms := len(h.rooms)
+	participants := 0
+	pending := 0
+	for _, room := range h.rooms {
+		participants += len(room.participants)
+		pending += len(room.pending)
+	}
+	observability.SetRoomsActive(rooms)
+	observability.SetParticipantsActive(participants)
+	observability.SetLobbyPending(pending)
 }

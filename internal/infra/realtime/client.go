@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
+
+	"we_cam/internal/infra/observability"
 )
 
 type Client struct {
@@ -45,6 +47,7 @@ func (c *Client) Run() {
 			c.hub.logger.Info("client websocket closed", "room", c.roomCode, "client", c.id, "error", err)
 			return
 		}
+		observability.IncWebsocketMessages()
 		message.From = c.id
 		c.hub.logger.Debug("signal received", "room", c.roomCode, "from", c.id, "to", message.To, "type", message.Type)
 		c.hub.handle(c, message)

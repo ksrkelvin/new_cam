@@ -10,6 +10,7 @@ import (
 	"we_cam/internal/domain/room"
 	"we_cam/internal/infra/config"
 	"we_cam/internal/infra/database"
+	"we_cam/internal/infra/observability"
 	"we_cam/internal/infra/realtime"
 )
 
@@ -22,6 +23,8 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 	templates := template.Must(template.ParseGlob("web/templates/*.html"))
 	router.SetHTMLTemplate(templates)
 	router.Static("/static", "web/static")
+	router.GET("/metrics", gin.WrapH(http.HandlerFunc(observability.Handler)))
+	router.POST("/client-logs", ClientLog)
 
 	roomService := room.NewService(database.NewRoomRepository(pool))
 	handler := NewRoomHandler(roomService)
