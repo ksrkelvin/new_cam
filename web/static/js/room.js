@@ -19,6 +19,8 @@ const peerConfig = {
 
 const peers = new Map();
 const knownPeers = new Set();
+const peerVolumes = new Map();
+let audioContext;
 let localStream;
 let selfID = "";
 let micEnabled = true;
@@ -120,14 +122,19 @@ async function createPeer(peerID, shouldOffer) {
 
   const tile = createTile(peerID);
   const connection = new RTCPeerConnection(peerConfig);
-  const entry = { connection, tile };
+  const entry = { connection, tile, audio: null };
   peers.set(peerID, entry);
+  setPeerVolume(peerID, peerVolumes.get(peerID) ?? 100);
 
   localStream.getTracks().forEach((track) => connection.addTrack(track, localStream));
 
   connection.ontrack = (event) => {
-    tile.video.srcObject = event.streams[0];
+    const [stream] = event.streams;
+    tile.video.srcObject = stream;
+    tile.video.muted = true;
     tile.name.textContent = `Camera ${shortID(peerID)}`;
+    entry.audio ||= createAudioController(stream);
+    setPeerVolume(peerID, peerVolumes.get(peerID) ?? 100);
   };
 
   connection.onicecandidate = (event) => {
@@ -163,6 +170,30 @@ function createTile(peerID) {
   const label = document.createElement("span");
   label.className = "camera-label";
 
+  const volumeControl = document.createElement("label");
+  volumeControl.className = "volume-control";
+  volumeControl.setAttribute("aria-label", "Volume deste participante");
+
+  const volumeIcon = document.createElement("span");
+  volumeIcon.className = "volume-icon";
+  volumeIcon.innerHTML = volumeIconSVG();
+
+  const volumeSlider = document.createElement("input");
+  volumeSlider.type = "range";
+  volumeSlider.min = "0";
+  volumeSlider.max = "200";
+  volumeSlider.value = String(peerVolumes.get(peerID) ?? 100);
+  volumeSlider.addEventListener("input", () => {
+    setPeerVolume(peerID, Number(volumeSlider.value));
+  });
+
+  const volumeValue = document.createElement("output");
+  volumeValue.className = "volume-value";
+  volumeValue.value = volumeSlider.value;
+  volumeValue.textContent = `${volumeSlider.value}%`;
+
+  volumeControl.append(volumeIcon, volumeSlider, volumeValue);
+
   const micStatus = document.createElement("span");
   micStatus.className = "mic-icon is-on";
   micStatus.setAttribute("aria-label", "Microfone ligado");
@@ -171,9 +202,57 @@ function createTile(peerID) {
   name.textContent = "Conectando";
 
   label.append(micStatus, name);
-  frame.append(video, label);
+  frame.append(video, label, volumeControl);
   stage.append(frame);
-  return { frame, video, name, micStatus };
+  return { frame, video, name, micStatus, volumeControl, volumeSlider, volumeValue };
+}
+
+function setPeerVolume(peerID, value) {
+  const entry = peers.get(peerID);
+  if (!entry) return;
+
+  const clampedValue = Math.max(0, Math.min(200, value));
+  const gain = clampedValue / 100;
+
+  peerVolumes.set(peerID, clampedValue);
+  entry.tile.video.muted = true;
+  entry.tile.video.volume = 0;
+  entry.audio?.setGain(gain);
+  entry.tile.volumeSlider.value = String(clampedValue);
+  entry.tile.volumeValue.value = String(clampedValue);
+  entry.tile.volumeValue.textContent = `${clampedValue}%`;
+  entry.tile.volumeControl.classList.toggle("is-muted", clampedValue === 0);
+}
+
+function createAudioController(stream) {
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return null;
+
+    audioContext ||= new AudioContextClass();
+    const audioTracks = stream.getAudioTracks();
+    if (audioTracks.length === 0) return null;
+
+    const audioOnlyStream = new MediaStream(audioTracks);
+    const source = audioContext.createMediaStreamSource(audioOnlyStream);
+    const gainNode = audioContext.createGain();
+    source.connect(gainNode).connect(audioContext.destination);
+
+    return {
+      setGain(value) {
+        if (audioContext.state === "suspended") {
+          audioContext.resume().catch(() => {});
+        }
+        gainNode.gain.value = value;
+      },
+      close() {
+        source.disconnect();
+        gainNode.disconnect();
+      },
+    };
+  } catch {
+    return null;
+  }
 }
 
 function removePeer(peerID) {
@@ -182,6 +261,7 @@ function removePeer(peerID) {
     updateGrid();
     return;
   }
+  entry.audio?.close();
   entry.connection.close();
   entry.tile.frame.remove();
   peers.delete(peerID);
@@ -238,6 +318,16 @@ function micOffIcon() {
       <path d="M19 11a6.97 6.97 0 0 1-1.2 3.92"></path>
       <path d="M12 18v3"></path>
       <path d="M8 21h8"></path>
+    </svg>
+  `;
+}
+
+function volumeIconSVG() {
+  return `
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M11 5 6 9H3v6h3l5 4V5Z"></path>
+      <path d="M15.5 8.5a5 5 0 0 1 0 7"></path>
+      <path d="M18.5 5.5a9 9 0 0 1 0 13"></path>
     </svg>
   `;
 }

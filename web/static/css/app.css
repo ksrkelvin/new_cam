@@ -262,7 +262,7 @@ h1 {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  max-width: calc(100% - 24px);
+  max-width: calc(55% - 18px);
   min-width: 0;
   border-radius: 6px;
   padding: 6px 9px 6px 7px;
@@ -270,6 +270,60 @@ h1 {
   background: rgba(17, 20, 24, 0.78);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
   backdrop-filter: blur(8px);
+}
+
+.volume-control {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: min(220px, calc(45% - 12px));
+  min-width: 160px;
+  border-radius: 6px;
+  padding: 6px 9px;
+  color: var(--text);
+  background: rgba(17, 20, 24, 0.78);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(8px);
+}
+
+.volume-control.is-muted {
+  color: #ffe5e5;
+}
+
+.volume-icon {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+}
+
+.volume-icon svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.2;
+}
+
+.volume-control input {
+  width: 100%;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
+.volume-value {
+  flex: 0 0 42px;
+  text-align: right;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
 }
 
 .camera-label.is-muted {
@@ -380,5 +434,29 @@ h1 {
   .mic-icon svg {
     width: 13px;
     height: 13px;
+  }
+
+  .volume-control {
+    right: 8px;
+    bottom: 8px;
+    width: min(164px, calc(58% - 8px));
+    min-width: 132px;
+    padding: 6px 8px;
+  }
+
+  .volume-icon {
+    flex-basis: 16px;
+    width: 16px;
+    height: 16px;
+  }
+
+  .volume-icon svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .volume-value {
+    flex-basis: 36px;
+    font-size: 0.7rem;
   }
 }
