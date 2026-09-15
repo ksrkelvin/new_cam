@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sala {{.Room.Code}} | We Cam</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-  <link rel="stylesheet" href="/static/css/app.css?v=20260915-14">
+  <link rel="stylesheet" href="/static/css/app.css?v=20260915-19">
 </head>
 <body data-room-code="{{.Room.Code}}" data-is-owner="{{.IsOwner}}">
   <main class="room-shell">
@@ -56,13 +56,48 @@
             Ferramentas da Mesa
           </h2>
           <div class="tool-tabs" role="tablist" aria-label="Ferramentas">
-            <button type="button" class="tool-tab is-active" role="tab" aria-selected="true">
+            <button type="button" class="tool-tab is-active" data-tool-tab="dice" role="tab" aria-selected="true">
+              <i class="fa-solid fa-dice-d20" aria-hidden="true"></i>
+              <span>Dados</span>
+            </button>
+            <button type="button" class="tool-tab" data-tool-tab="music" role="tab" aria-selected="false">
               <i class="fa-solid fa-music" aria-hidden="true"></i>
               <span>Música</span>
             </button>
           </div>
         </section>
-        <section class="sidebar-card music-panel" id="music-panel">
+        <section class="sidebar-card dice-panel" id="dice-panel" data-tool-panel="dice">
+          <h2>
+            <span><i class="fa-solid fa-dice-d20" aria-hidden="true"></i></span>
+            Dados
+          </h2>
+          <form id="dice-form" class="dice-form">
+            <label>
+              <span>Quantidade</span>
+              <input id="dice-count" type="number" min="1" max="20" value="1" inputmode="numeric" aria-label="Quantidade de dados">
+            </label>
+            <label>
+              <span>Dado</span>
+              <select id="dice-sides" aria-label="Modelo de dado">
+                <option value="4">d4</option>
+                <option value="6">d6</option>
+                <option value="8">d8</option>
+                <option value="10">d10</option>
+                <option value="12">d12</option>
+                <option value="20" selected>d20</option>
+                <option value="100">d100</option>
+              </select>
+            </label>
+            <label>
+              <span>Adicional</span>
+              <input id="dice-modifier" type="number" min="-1000" max="1000" value="0" inputmode="numeric" aria-label="Adicional da rolagem">
+            </label>
+            <button type="submit" aria-label="Rolar dados"><i class="fa-solid fa-dice" aria-hidden="true"></i></button>
+          </form>
+          <h3 class="dice-history-title">Últimas rolagens</h3>
+          <div id="dice-log" class="dice-log" aria-live="polite"></div>
+        </section>
+        <section class="sidebar-card music-panel {{if .IsOwner}}is-owner{{else}}is-player{{end}}" id="music-panel" data-tool-panel="music" hidden>
           <h2>
             <span><i class="fa-solid fa-music" aria-hidden="true"></i></span>
             Música da mesa
@@ -99,7 +134,9 @@
             <div id="music-volume-bars" class="music-eq" role="slider" tabindex="0" aria-label="Volume local da música" aria-valuemin="0" aria-valuemax="100" aria-valuenow="60">
               <span></span><span></span><span></span><span></span><span></span><span></span>
             </div>
+            {{if .IsOwner}}
             <button type="button" id="music-loop" class="music-loop-button" aria-label="Ligar repetição"><i class="fa-solid fa-repeat" aria-hidden="true"></i></button>
+            {{end}}
             <button type="button" id="music-mute" class="music-mute-button" aria-label="Mutar música"><i class="fa-solid fa-volume-high" aria-hidden="true"></i></button>
           </div>
           <button type="button" id="music-enable" class="secondary-button music-enable" hidden>Ativar música da mesa</button>
@@ -126,6 +163,7 @@
       <button type="button" id="toggle-camera" class="control-button" aria-label="Desligar camera"><i class="fa-solid fa-video" aria-hidden="true"></i></button>
       <button type="button" id="leave-room" class="control-button danger-button" aria-label="Sair"><i class="fa-solid fa-phone-slash" aria-hidden="true"></i></button>
     </footer>
+    <div id="dice-toast-layer" class="dice-toast-layer" aria-live="polite" aria-atomic="true"></div>
 
     <section class="lobby" id="lobby" hidden>
       <div class="lobby-panel">
@@ -143,7 +181,7 @@
       </div>
     </section>
   </main>
-  <script src="/static/js/room.js?v=20260915-14"></script>
+  <script src="/static/js/room.js?v=20260915-19"></script>
   <script src="https://www.youtube.com/iframe_api"></script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 const maxParticipants = 10;
-const appVersion = "20260915-14";
+const appVersion = "20260915-19";
 const roomCode = document.body.dataset.roomCode;
 const isOwner = document.body.dataset.isOwner === "true";
 const stage = document.querySelector("#stage");
@@ -12,6 +12,14 @@ const toggleMic = document.querySelector("#toggle-mic");
 const shareRoom = document.querySelector("#share-room");
 const leaveRoom = document.querySelector("#leave-room");
 const ownerPanel = document.querySelector("#owner-panel");
+const toolTabs = document.querySelectorAll("[data-tool-tab]");
+const toolPanels = document.querySelectorAll("[data-tool-panel]");
+const diceForm = document.querySelector("#dice-form");
+const diceCount = document.querySelector("#dice-count");
+const diceSides = document.querySelector("#dice-sides");
+const diceModifier = document.querySelector("#dice-modifier");
+const diceLog = document.querySelector("#dice-log");
+const diceToastLayer = document.querySelector("#dice-toast-layer");
 const musicForm = document.querySelector("#music-form");
 const musicURLInput = document.querySelector("#music-url");
 const musicPlayPause = document.querySelector("#music-play-pause");
@@ -156,6 +164,16 @@ async function handleSignalMessage(message) {
 
   if (message.type === "music-state") {
     applyMusicState(message.data);
+    return;
+  }
+
+  if (message.type === "dice-result") {
+    renderDiceResult(message.data);
+    return;
+  }
+
+  if (message.type === "dice-error") {
+    renderDiceError(message.data?.message || "Rolagem invalida.");
     return;
   }
 
@@ -620,6 +638,94 @@ function send(type, to = "", data) {
   socket.send(JSON.stringify({ type, to, data }));
 }
 
+function selectTool(toolName) {
+  for (const tab of toolTabs) {
+    const selected = tab.dataset.toolTab === toolName;
+    tab.classList.toggle("is-active", selected);
+    tab.setAttribute("aria-selected", selected ? "true" : "false");
+  }
+  for (const panel of toolPanels) {
+    panel.hidden = panel.dataset.toolPanel !== toolName;
+  }
+}
+
+function sendDiceRoll() {
+  const count = Number(diceCount?.value || 1);
+  const sides = Number(diceSides?.value || 20);
+  const modifier = Number(diceModifier?.value || 0);
+  send("dice-roll", "", { count, sides, modifier });
+}
+
+function renderDiceResult(roll) {
+  if (!diceLog || !roll) return;
+  showDiceToast(roll);
+  const item = document.createElement("div");
+  item.className = "dice-result";
+
+  const header = document.createElement("div");
+  header.className = "dice-result-header";
+
+  const roller = document.createElement("strong");
+  roller.textContent = roll.roller || "Jogador";
+
+  const expression = document.createElement("span");
+  expression.textContent = roll.expression || "";
+
+  const total = document.createElement("b");
+  total.textContent = String(roll.total ?? "");
+
+  header.append(roller, expression, total);
+
+  const details = document.createElement("p");
+  const rolls = Array.isArray(roll.rolls) ? roll.rolls.join(", ") : "";
+  const modifier = Number(roll.modifier || 0);
+  details.textContent = modifier === 0 ? `[${rolls}]` : `[${rolls}] ${modifier > 0 ? "+" : ""}${modifier}`;
+
+  item.append(header, details);
+  diceLog.prepend(item);
+  while (diceLog.children.length > 6) diceLog.lastElementChild.remove();
+}
+
+function showDiceToast(roll) {
+  if (!diceToastLayer || !roll) return;
+  const toast = document.createElement("div");
+  toast.className = "dice-toast";
+
+  const icon = document.createElement("span");
+  icon.className = "dice-toast-icon";
+  icon.innerHTML = '<i class="fa-solid fa-dice-d20" aria-hidden="true"></i>';
+
+  const body = document.createElement("div");
+  body.className = "dice-toast-body";
+
+  const title = document.createElement("strong");
+  title.textContent = `${roll.roller || "Jogador"} rolou ${roll.expression || ""}`;
+
+  const detail = document.createElement("span");
+  const rolls = Array.isArray(roll.rolls) ? roll.rolls.join(" + ") : "";
+  const modifier = Number(roll.modifier || 0);
+  detail.textContent = modifier === 0 ? rolls : `${rolls} ${modifier > 0 ? "+" : "-"} ${Math.abs(modifier)}`;
+
+  body.append(title, detail);
+
+  const total = document.createElement("b");
+  total.textContent = String(roll.total ?? "");
+
+  toast.append(icon, body, total);
+  diceToastLayer.replaceChildren(toast);
+  setTimeout(() => {
+    if (toast.parentElement === diceToastLayer) toast.remove();
+  }, 3600);
+}
+
+function renderDiceError(message) {
+  if (!diceLog) return;
+  const item = document.createElement("div");
+  item.className = "dice-result is-error";
+  item.textContent = message;
+  diceLog.prepend(item);
+}
+
 function handleYouTubeReady() {
   youtubePlayerReady = true;
   setMusicVolume(musicVolumeValue);
@@ -951,6 +1057,15 @@ musicForm?.addEventListener("submit", (event) => {
   }
   musicUserActivated = true;
   send("music-set", "", { videoId });
+});
+
+for (const tab of toolTabs) {
+  tab.addEventListener("click", () => selectTool(tab.dataset.toolTab));
+}
+
+diceForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  sendDiceRoll();
 });
 
 musicPlayPause?.addEventListener("click", () => {

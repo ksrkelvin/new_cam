@@ -1206,7 +1206,8 @@ body:has(.home-shell) {
   color: #d9e3fb;
 }
 
-.music-panel {
+.music-panel,
+.dice-panel {
   display: grid;
   gap: 12px;
   margin-bottom: 18px;
@@ -1216,13 +1217,55 @@ body:has(.home-shell) {
   background: rgba(8, 17, 31, 0.58);
 }
 
-.music-form {
+.music-panel[hidden],
+.dice-panel[hidden] {
+  display: none;
+}
+
+.dice-buttons {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 44px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
 
-.music-form input {
+.dice-buttons button {
+  min-width: 0;
+  min-height: 40px;
+  border: 1px solid rgba(126, 148, 188, 0.22);
+  border-radius: 10px;
+  padding: 0 8px;
+  color: #d7e1f8;
+  background: rgba(12, 21, 38, 0.28);
+  font-size: 0.82rem;
+}
+
+.dice-buttons button:hover {
+  border-color: rgba(145, 164, 203, 0.4);
+  background: rgba(18, 29, 51, 0.38);
+}
+
+.music-form,
+.dice-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 44px;
+  gap: 8px;
+}
+
+.dice-form label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.dice-form label span {
+  color: #7f91ad;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.music-form input,
+.dice-form input,
+.dice-form select {
   min-width: 0;
   min-height: 44px;
   border: 1px solid rgba(122, 145, 184, 0.22);
@@ -1232,13 +1275,176 @@ body:has(.home-shell) {
   background: rgba(7, 14, 26, 0.74);
 }
 
-.music-form button {
+.dice-form button {
+  align-self: end;
+}
+
+.music-form button,
+.dice-form button {
   display: inline-grid;
   place-items: center;
   min-width: 44px;
   min-height: 44px;
   border-radius: 10px;
   padding: 0;
+}
+
+.dice-log {
+  display: grid;
+  gap: 8px;
+}
+
+.dice-history-title {
+  margin: 2px 0 -2px;
+  color: #dce8ff;
+  font-size: 0.86rem;
+}
+
+.dice-result {
+  border: 1px solid rgba(126, 148, 188, 0.18);
+  border-radius: 10px;
+  padding: 9px 10px;
+  color: #bac7df;
+  background: rgba(7, 14, 26, 0.5);
+}
+
+.dice-result.is-error {
+  color: #ffd4d4;
+  border-color: rgba(255, 107, 107, 0.28);
+  background: rgba(58, 31, 36, 0.58);
+  font-size: 0.82rem;
+}
+
+.dice-result-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.dice-result-header strong,
+.dice-result-header span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dice-result-header strong {
+  color: #edf4ff;
+  font-size: 0.84rem;
+}
+
+.dice-result-header span {
+  color: #7f91ad;
+  font-size: 0.78rem;
+}
+
+.dice-result-header b {
+  display: inline-grid;
+  place-items: center;
+  min-width: 34px;
+  height: 28px;
+  border-radius: 999px;
+  color: #07111e;
+  background: #f2b84b;
+  font-size: 0.9rem;
+}
+
+.dice-result p {
+  margin: 6px 0 0;
+  color: #7f91ad;
+  font-size: 0.78rem;
+}
+
+.dice-toast-layer {
+  position: fixed;
+  left: 50%;
+  bottom: 104px;
+  z-index: 18;
+  width: min(520px, calc(100vw - 28px));
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.dice-toast {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid rgba(126, 148, 188, 0.28);
+  border-radius: 999px;
+  padding: 10px 12px;
+  color: #edf4ff;
+  background: rgba(7, 14, 26, 0.9);
+  box-shadow: 0 18px 54px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(18px);
+  animation: dice-toast-rise 3600ms ease forwards;
+}
+
+.dice-toast-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  color: #07111e;
+  background: #f2b84b;
+  font-size: 1.15rem;
+}
+
+.dice-toast-body {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.dice-toast-body strong,
+.dice-toast-body span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dice-toast-body strong {
+  font-size: 0.9rem;
+}
+
+.dice-toast-body span {
+  color: #9fb0cf;
+  font-size: 0.8rem;
+}
+
+.dice-toast b {
+  display: inline-grid;
+  place-items: center;
+  min-width: 44px;
+  height: 36px;
+  border-radius: 999px;
+  color: #061016;
+  background: #16e08a;
+  font-size: 1.05rem;
+}
+
+@keyframes dice-toast-rise {
+  0% {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  12% {
+    opacity: 1;
+    transform: translateY(-8px);
+  }
+  22%,
+  78% {
+    opacity: 1;
+    transform: translateY(-12px);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(20px);
+  }
 }
 
 .music-now {
@@ -1253,6 +1459,10 @@ body:has(.home-shell) {
   color: #bac7df;
   background: rgba(7, 14, 26, 0.78);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.music-panel.is-player .music-now {
+  grid-template-columns: 26px minmax(0, 1fr) auto 30px;
 }
 
 .music-player-icon {
@@ -1683,6 +1893,15 @@ body:has(.home-shell) {
     grid-template-columns: minmax(0, 1fr) 42px;
   }
 
+  .dice-form {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .dice-form button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
   .pending-item {
     grid-template-columns: 1fr 1fr;
   }
@@ -1720,6 +1939,27 @@ body:has(.home-shell) {
     min-height: 46px;
     border-radius: 50%;
     padding: 0;
+  }
+
+  .dice-toast-layer {
+    bottom: 78px;
+    width: calc(100vw - 18px);
+  }
+
+  .dice-toast {
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+    gap: 9px;
+    padding: 8px 10px;
+  }
+
+  .dice-toast-icon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .dice-toast b {
+    min-width: 38px;
+    height: 32px;
   }
 }
 

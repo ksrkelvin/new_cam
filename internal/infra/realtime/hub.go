@@ -2,10 +2,15 @@ package realtime
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"math/big"
 	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -42,6 +47,17 @@ type musicState struct {
 	Position  float64 `json:"position"`
 	UpdatedAt int64   `json:"updatedAt"`
 	Revision  int64   `json:"revision"`
+}
+
+type diceRoll struct {
+	Roller     string `json:"roller"`
+	Expression string `json:"expression"`
+	Count      int    `json:"count"`
+	Sides      int    `json:"sides"`
+	Modifier   int    `json:"modifier"`
+	Rolls      []int  `json:"rolls"`
+	Total      int    `json:"total"`
+	RolledAt   int64  `json:"rolledAt"`
 }
 
 type signalMessage struct {
@@ -217,6 +233,11 @@ func (h *Hub) handle(client *Client, message signalMessage) {
 		return
 	}
 
+	if client.isApproved && message.Type == "dice-roll" {
+		h.handleDiceRollLocked(client, message)
+		return
+	}
+
 	if client.isApproved && message.Type == "participant-info" {
 		client.displayName = stringFromJSON(message.Data, "name")
 		h.broadcast(client, signalMessage{Type: "peer-info", From: client.id, Data: mustJSON(map[string]any{"name": clientName(client)})})
@@ -352,6 +373,23 @@ func (h *Hub) broadcastMusicLocked(room *liveRoom) {
 	}
 }
 
+func (h *Hub) handleDiceRollLocked(client *Client, message signalMessage) {
+	room := h.rooms[client.roomCode]
+	if room == nil {
+		return
+	}
+	roll, ok := rollDiceFromJSON(message.Data)
+	if !ok {
+		_ = client.send(signalMessage{Type: "dice-error", Data: mustJSON(map[string]string{"message": "Escolha uma quantidade de 1 a 20 e um dado valido."})})
+		return
+	}
+	roll.Roller = clientName(client)
+	roll.RolledAt = time.Now().UnixMilli()
+	for participant := range room.participants {
+		_ = participant.send(signalMessage{Type: "dice-result", From: client.id, Data: mustJSON(roll)})
+	}
+}
+
 func (h *Hub) musicState(roomCode string) musicState {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -438,6 +476,114 @@ func validYouTubeVideoID(videoID string) bool {
 		return false
 	}
 	return true
+}
+
+var diceExpressionPattern = regexp.MustCompile(`(?i)^/?r?\s*(?:(\d*)d)?(\d+)(?:\s*([+-])\s*(\d+))?$`)
+
+func rollDiceFromJSON(data json.RawMessage) (diceRoll, bool) {
+	var payload struct {
+		Count      int    `json:"count"`
+		Sides      int    `json:"sides"`
+		Modifier   int    `json:"modifier"`
+		Expression string `json:"expression"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return diceRoll{}, false
+	}
+	if payload.Count > 0 || payload.Sides > 0 {
+		return rollDiceParts(payload.Count, payload.Sides, payload.Modifier)
+	}
+	return rollDice(payload.Expression)
+}
+
+func rollDice(expression string) (diceRoll, bool) {
+	cleanExpression := strings.TrimSpace(expression)
+	matches := diceExpressionPattern.FindStringSubmatch(cleanExpression)
+	if matches == nil {
+		return diceRoll{}, false
+	}
+
+	count := 1
+	if matches[1] != "" {
+		parsedCount, err := strconv.Atoi(matches[1])
+		if err != nil {
+			return diceRoll{}, false
+		}
+		count = parsedCount
+	}
+
+	sides, err := strconv.Atoi(matches[2])
+	if err != nil {
+		return diceRoll{}, false
+	}
+
+	modifier := 0
+	if matches[4] != "" {
+		parsedModifier, err := strconv.Atoi(matches[4])
+		if err != nil {
+			return diceRoll{}, false
+		}
+		if matches[3] == "-" {
+			parsedModifier *= -1
+		}
+		modifier = parsedModifier
+	}
+
+	return rollDiceParts(count, sides, modifier)
+}
+
+func rollDiceParts(count int, sides int, modifier int) (diceRoll, bool) {
+	if count < 1 || count > 20 || !validDiceSides(sides) || modifier < -1000 || modifier > 1000 {
+		return diceRoll{}, false
+	}
+
+	rolls := make([]int, 0, count)
+	total := modifier
+	for range count {
+		value, ok := secureDieRoll(sides)
+		if !ok {
+			return diceRoll{}, false
+		}
+		rolls = append(rolls, value)
+		total += value
+	}
+
+	return diceRoll{
+		Expression: formatDiceExpression(count, sides, modifier),
+		Count:      count,
+		Sides:      sides,
+		Modifier:   modifier,
+		Rolls:      rolls,
+		Total:      total,
+	}, true
+}
+
+func validDiceSides(sides int) bool {
+	switch sides {
+	case 4, 6, 8, 10, 12, 20, 100:
+		return true
+	default:
+		return false
+	}
+}
+
+func secureDieRoll(sides int) (int, bool) {
+	value, err := rand.Int(rand.Reader, big.NewInt(int64(sides)))
+	if err != nil {
+		return 0, false
+	}
+	return int(value.Int64()) + 1, true
+}
+
+func formatDiceExpression(count int, sides int, modifier int) string {
+	expression := strconv.Itoa(count) + "d" + strconv.Itoa(sides)
+	if modifier > 0 {
+		expression += "+" + strconv.Itoa(modifier)
+	}
+	if modifier < 0 {
+		expression += strconv.Itoa(modifier)
+	}
+	return expression
 }
 
 func clientName(client *Client) string {
