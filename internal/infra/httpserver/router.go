@@ -3,6 +3,7 @@ package httpserver
 import (
 	"html/template"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,7 +23,15 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 
 	templates := template.Must(template.ParseGlob("web/templates/*.html"))
 	router.SetHTMLTemplate(templates)
+	router.Use(func(ctx *gin.Context) {
+		if strings.HasPrefix(ctx.Request.URL.Path, "/static/") {
+			ctx.Header("Cache-Control", "no-store, max-age=0")
+		}
+		ctx.Next()
+	})
 	router.Static("/static", "web/static")
+	router.StaticFile("/brand-logo.png", "web/7b2097c3-bb06-4ea8-beff-32926a1e87ce.png")
+	router.StaticFile("/favicon.png", "web/7b2097c3-bb06-4ea8-beff-32926a1e87ce.png")
 	router.StaticFile("/room-create-bg.png", "web/11e5e664-bd50-4efe-90cf-67661cc8d608.png")
 	router.StaticFile("/room-call-bg.png", "web/08ce0f1d-bfc1-48f4-9c97-a616342cda13.png")
 	router.GET("/metrics", gin.WrapH(http.HandlerFunc(observability.Handler)))

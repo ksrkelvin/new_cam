@@ -1,14 +1,15 @@
 import { createDice } from "./room/dice.js";
 import { dom } from "./room/dom.js";
 import { getOrCreateClientLogID, getOrCreateGuestToken, guestNameKey } from "./room/identity.js";
+import { createInitiative } from "./room/initiative.js";
 import { connectionInfo, createLogger } from "./room/logger.js";
-import { createLocalMedia, updateMicStatus } from "./room/media.js";
+import { createLocalMedia, updateMicStatus } from "./room/media.js?v=20260915-48";
 import { createMusic } from "./room/music.js";
 import { createParticipants } from "./room/participants.js";
-import { createPeerManager } from "./room/peers.js";
+import { createPeerManager } from "./room/peers.js?v=20260915-48";
 
 const maxParticipants = 10;
-const appVersion = "20260915-21";
+const appVersion = "20260915-48";
 const roomCode = document.body.dataset.roomCode;
 const isOwner = document.body.dataset.isOwner === "true";
 const guestToken = isOwner ? "" : getOrCreateGuestToken(roomCode);
@@ -32,6 +33,7 @@ const peerVolumes = new Map();
 let selfID = "";
 let approved = isOwner;
 let peerManager;
+let hasLeftRoom = false;
 
 function send(type, to = "", data) {
   if (socket.readyState !== WebSocket.OPEN) return;
@@ -42,6 +44,7 @@ const localMedia = createLocalMedia({
   dom,
   logClientEvent,
   sendMediaState: (micEnabled) => send("media-state", "", { micEnabled }),
+  replaceLocalTrack: (kind, track) => peerManager?.replaceLocalTrack(kind, track),
 });
 
 const participants = createParticipants({
@@ -69,6 +72,7 @@ peerManager = createPeerManager({
 });
 
 const dice = createDice({ dom, send });
+const initiative = createInitiative({ dom, isOwner, send });
 const music = createMusic({ dom, isOwner, send, logClientEvent });
 music.installYouTubeCallback();
 
@@ -125,7 +129,10 @@ async function handleSignalMessage(message) {
     approved = true;
     dom.lobby.hidden = true;
     dom.stage.classList.remove("is-waiting");
-    if (isOwner) dom.ownerPanel.setAttribute("aria-hidden", "true");
+    if (isOwner && dom.ownerPanel) {
+      if (dom.ownerPanel.contains(document.activeElement)) document.activeElement.blur();
+      dom.ownerPanel.setAttribute("aria-hidden", "true");
+    }
     knownPeers.clear();
     for (const peerID of message.peers || []) knownPeers.add(peerID);
     participants.rememberPeerNames(message.data?.peers || []);
@@ -137,6 +144,7 @@ async function handleSignalMessage(message) {
     send("participant-info", "", { name: localDisplayName() });
     send("media-state", "", { micEnabled: localMedia.isMicEnabled() });
     music.applyMusicState(message.data?.music);
+    initiative.applyInitiativeState(message.data?.initiative);
     for (const peerID of knownPeers) await peerManager.createPeer(peerID, true);
     participants.updateGrid(approved);
     return;
@@ -151,6 +159,10 @@ async function handleSignalMessage(message) {
   }
   if (message.type === "dice-error") {
     dice.renderDiceError(message.data?.message || "Rolagem invalida.");
+    return;
+  }
+  if (message.type === "initiative-state") {
+    initiative.applyInitiativeState(message.data);
     return;
   }
   if (message.type === "pending-list" && isOwner) {
@@ -219,18 +231,41 @@ function selectTool(toolName) {
 function bindEvents() {
   for (const tab of dom.toolTabs) tab.addEventListener("click", () => selectTool(tab.dataset.toolTab));
   dice.bindEvents();
+  initiative.bindEvents();
   music.bindEvents();
   dom.toggleCamera.addEventListener("click", () => localMedia.setCameraEnabled(!(localMedia.getLocalStream()?.getVideoTracks()[0]?.enabled ?? false)));
   dom.toggleMic.addEventListener("click", () => localMedia.setMicEnabled(!(localMedia.getLocalStream()?.getAudioTracks()[0]?.enabled ?? false)));
   dom.lobbyToggleCamera.addEventListener("click", () => localMedia.setCameraEnabled(!(localMedia.getLocalStream()?.getVideoTracks()[0]?.enabled ?? false)));
   dom.lobbyToggleMic.addEventListener("click", () => localMedia.setMicEnabled(!(localMedia.getLocalStream()?.getAudioTracks()[0]?.enabled ?? false)));
+  for (const select of deviceSelects("video")) select.addEventListener("change", () => localMedia.selectDevice("video", select.value));
+  for (const select of deviceSelects("audio")) select.addEventListener("change", () => localMedia.selectDevice("audio", select.value));
+  for (const button of deviceRefreshButtons()) button.addEventListener("click", refreshDevices);
   dom.requestEntry.addEventListener("click", requestEntry);
   dom.shareRoom.addEventListener("click", shareCurrentRoom);
-  dom.leaveRoom.addEventListener("click", () => {
-    leaveCurrentRoom();
-    window.location.href = "/";
-  });
+  dom.leaveRoom.addEventListener("click", goHome);
+  dom.lobbyLeaveRoom?.addEventListener("click", goHome);
   window.addEventListener("beforeunload", leaveCurrentRoom);
+  window.addEventListener("pagehide", leaveCurrentRoom);
+  window.addEventListener("focus", refreshDevices);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) refreshDevices();
+  });
+}
+
+function deviceSelects(kind) {
+  const domSelects = kind === "video" ? dom.cameraSelects : dom.microphoneSelects;
+  return Array.from(domSelects || document.querySelectorAll(`[data-device-select="${kind}"]`));
+}
+
+function deviceRefreshButtons() {
+  return Array.from(dom.deviceRefreshButtons || document.querySelectorAll("[data-device-refresh]"));
+}
+
+function refreshDevices() {
+  const refresh = localMedia.refreshDeviceOptions || localMedia.ensureMedia;
+  refresh().catch((error) => {
+    logClientEvent("warn", "manual-device-refresh-error", { name: error.name, message: error.message });
+  });
 }
 
 async function requestEntry() {
@@ -238,6 +273,7 @@ async function requestEntry() {
     await localMedia.ensureMedia();
     const name = dom.guestName.value.trim() || "Convidado";
     localStorage.setItem(guestStorageKey, name);
+    await waitForSocketOpen();
     send("lobby-info", "", { name });
     dom.requestEntry.disabled = true;
     dom.lobbyStatus.textContent = "Aguardando autorizacao do criador da sala.";
@@ -247,10 +283,44 @@ async function requestEntry() {
   }
 }
 
+function waitForSocketOpen() {
+  if (socket.readyState === WebSocket.OPEN) return Promise.resolve();
+  if (socket.readyState === WebSocket.CLOSED || socket.readyState === WebSocket.CLOSING) {
+    return Promise.reject(new Error("Conexao com a sala encerrada."));
+  }
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("A conexao com a sala demorou para abrir."));
+    }, 6000);
+    function cleanup() {
+      clearTimeout(timeout);
+      socket.removeEventListener("open", handleOpen);
+      socket.removeEventListener("close", handleClose);
+      socket.removeEventListener("error", handleError);
+    }
+    function handleOpen() {
+      cleanup();
+      resolve();
+    }
+    function handleClose() {
+      cleanup();
+      reject(new Error("Conexao com a sala encerrada."));
+    }
+    function handleError() {
+      cleanup();
+      reject(new Error("Nao foi possivel conectar na sala."));
+    }
+    socket.addEventListener("open", handleOpen);
+    socket.addEventListener("close", handleClose);
+    socket.addEventListener("error", handleError);
+  });
+}
+
 async function shareCurrentRoom() {
   const url = window.location.href;
   if (navigator.share) {
-    await navigator.share({ title: "Sala We Cam", url }).catch(() => {});
+    await navigator.share({ title: "Sala Tavernia", url }).catch(() => {});
     return;
   }
   await navigator.clipboard.writeText(url);
@@ -261,10 +331,17 @@ async function shareCurrentRoom() {
 }
 
 function leaveCurrentRoom() {
+  if (hasLeftRoom) return;
+  hasLeftRoom = true;
   logClientEvent("info", "leave-room", { readyState: socket.readyState, peers: peerManager.peerCount() });
   for (const peerID of peerManager.peerIDs()) peerManager.removePeer(peerID);
   localMedia.stop();
   if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) socket.close(1000, "leaving room");
+}
+
+function goHome() {
+  leaveCurrentRoom();
+  window.location.assign("/");
 }
 
 function localDisplayName() {
@@ -274,5 +351,5 @@ function localDisplayName() {
 
 bindEvents();
 localMedia.ensureMedia().catch(() => {
-  dom.localState.textContent = "Permita o acesso a camera";
+  dom.localState.textContent = localDisplayName();
 });

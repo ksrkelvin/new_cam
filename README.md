@@ -1,4 +1,4 @@
-# We Cam
+# Tavernia
 
 Aplicacao Go para criar salas e compartilhar camera no navegador.
 

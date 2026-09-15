@@ -3,20 +3,29 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Sala {{.Room.Code}} | We Cam</title>
+  <title>Sala {{.Room.Code}} | Tavernia</title>
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="apple-touch-icon" href="/favicon.png">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-  <link rel="stylesheet" href="/static/css/app.css?v=20260915-19">
+  <link rel="stylesheet" href="/static/css/app.css?v=20260915-48">
 </head>
 <body data-room-code="{{.Room.Code}}" data-is-owner="{{.IsOwner}}">
   <main class="room-shell">
     <header class="room-header">
-      <a href="/" class="brand" aria-label="We Cam">
-        <span class="brand-mark">W</span>
+      <a href="/" class="brand" aria-label="Tavernia">
+        <span class="brand-mark"><img src="/brand-logo.png" alt=""></span>
         <span>
           <strong>{{.Room.Name}}</strong>
-          <small>We Cam &bull; Sala privada</small>
+          <small>Tavernia &bull; Sala privada</small>
         </span>
       </a>
+      <div id="initiative-banner" class="initiative-banner" hidden aria-live="polite" aria-label="Ordem de iniciativa"></div>
+      {{if .IsOwner}}
+      <div id="entry-alert" class="entry-alert" hidden role="status" aria-live="polite">
+        <i class="fa-solid fa-user-clock" aria-hidden="true"></i>
+        <span>Novo pedido de entrada</span>
+      </div>
+      {{end}}
       <div class="header-actions">
         <div class="room-code">
           <span>Sala</span>
@@ -63,6 +72,10 @@
             <button type="button" class="tool-tab" data-tool-tab="music" role="tab" aria-selected="false">
               <i class="fa-solid fa-music" aria-hidden="true"></i>
               <span>Música</span>
+            </button>
+            <button type="button" class="tool-tab" data-tool-tab="initiative" role="tab" aria-selected="false">
+              <i class="fa-solid fa-list-ol" aria-hidden="true"></i>
+              <span>Iniciativa</span>
             </button>
           </div>
         </section>
@@ -141,6 +154,24 @@
           </div>
           <button type="button" id="music-enable" class="secondary-button music-enable" hidden>Ativar música da mesa</button>
         </section>
+        <section class="sidebar-card initiative-panel {{if .IsOwner}}is-owner{{else}}is-player{{end}}" id="initiative-panel" data-tool-panel="initiative" hidden>
+          <h2>
+            <span><i class="fa-solid fa-list-ol" aria-hidden="true"></i></span>
+            Iniciativa
+          </h2>
+          {{if .IsOwner}}
+          <form id="initiative-form" class="initiative-form">
+            <input id="initiative-name" type="text" maxlength="40" placeholder="Nome" autocomplete="off" aria-label="Nome na iniciativa">
+            <input id="initiative-score" type="number" min="-100" max="200" placeholder="Valor" inputmode="numeric" aria-label="Valor da iniciativa">
+            <button type="submit" aria-label="Adicionar iniciativa"><i class="fa-solid fa-plus" aria-hidden="true"></i></button>
+          </form>
+          <button type="button" id="initiative-pass" class="secondary-button initiative-pass">
+            <i class="fa-solid fa-forward-step" aria-hidden="true"></i>
+            <span>Passar turno</span>
+          </button>
+          {{end}}
+          <div id="initiative-list" class="initiative-list" aria-live="polite"></div>
+        </section>
         {{if .IsOwner}}
         <section class="sidebar-card owner-panel is-open" id="owner-panel" aria-hidden="false">
           <h2>
@@ -159,8 +190,24 @@
     </div>
 
     <footer class="controls">
-      <button type="button" id="toggle-mic" class="control-button" aria-label="Desligar microfone"><i class="fa-solid fa-microphone" aria-hidden="true"></i></button>
-      <button type="button" id="toggle-camera" class="control-button" aria-label="Desligar camera"><i class="fa-solid fa-video" aria-hidden="true"></i></button>
+      <div class="control-device">
+        <button type="button" id="toggle-mic" class="control-button" aria-label="Desligar microfone"><i class="fa-solid fa-microphone" aria-hidden="true"></i></button>
+        <span class="device-picker">
+          <select id="microphone-select" data-device-select="audio" autocomplete="off" aria-label="Selecionar microfone">
+            <option value="">Microfone</option>
+          </select>
+          <i class="fa-solid fa-chevron-up" aria-hidden="true"></i>
+        </span>
+      </div>
+      <div class="control-device">
+        <button type="button" id="toggle-camera" class="control-button" aria-label="Desligar camera"><i class="fa-solid fa-video" aria-hidden="true"></i></button>
+        <span class="device-picker">
+          <select id="camera-select" data-device-select="video" autocomplete="off" aria-label="Selecionar camera">
+            <option value="">Camera</option>
+          </select>
+          <i class="fa-solid fa-chevron-up" aria-hidden="true"></i>
+        </span>
+      </div>
       <button type="button" id="leave-room" class="control-button danger-button" aria-label="Sair"><i class="fa-solid fa-phone-slash" aria-hidden="true"></i></button>
     </footer>
     <div id="dice-toast-layer" class="dice-toast-layer" aria-live="polite" aria-atomic="true"></div>
@@ -170,17 +217,32 @@
         <h1>Pronto para entrar?</h1>
         <p>Confira camera e microfone antes de pedir autorizacao ao criador da sala.</p>
         <video id="lobby-video" autoplay muted playsinline></video>
+        <div class="device-settings" aria-label="Dispositivos de audio e video">
+          <label for="lobby-camera-select">
+            <span>Camera</span>
+            <select id="lobby-camera-select" data-device-select="video" autocomplete="off">
+              <option value="">Camera padrao</option>
+            </select>
+          </label>
+          <label for="lobby-microphone-select">
+            <span>Microfone</span>
+            <select id="lobby-microphone-select" data-device-select="audio" autocomplete="off">
+              <option value="">Microfone padrao</option>
+            </select>
+          </label>
+        </div>
         <label for="guest-name">Seu nome</label>
         <input id="guest-name" type="text" maxlength="40" autocomplete="name" placeholder="Convidado">
         <div class="lobby-actions">
           <button type="button" id="request-entry">Entrar</button>
           <button type="button" id="lobby-toggle-camera">Desligar camera</button>
           <button type="button" id="lobby-toggle-mic">Desligar microfone</button>
+          <button type="button" id="lobby-leave-room" class="danger-button">Sair</button>
         </div>
         <p class="lobby-status" id="lobby-status">Aguardando sua confirmacao.</p>
       </div>
     </section>
   </main>
-  <script type="module" src="/static/js/room.js?v=20260915-21"></script>
+  <script type="module" src="/static/js/room.js?v=20260915-48"></script>
 </body>
 </html>

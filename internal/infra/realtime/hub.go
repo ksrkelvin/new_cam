@@ -39,6 +39,7 @@ type liveRoom struct {
 	participants map[*Client]struct{}
 	pending      map[*Client]struct{}
 	music        musicState
+	initiative   initiativeState
 }
 
 type musicState struct {
@@ -58,6 +59,17 @@ type diceRoll struct {
 	Rolls      []int  `json:"rolls"`
 	Total      int    `json:"total"`
 	RolledAt   int64  `json:"rolledAt"`
+}
+
+type initiativeState struct {
+	Entries []initiativeEntry `json:"entries"`
+	Turn    int               `json:"turn"`
+}
+
+type initiativeEntry struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Score int    `json:"score"`
 }
 
 type signalMessage struct {
@@ -103,10 +115,11 @@ func (h *Hub) Serve(writer http.ResponseWriter, request *http.Request, roomCode 
 	}
 	if client.isApproved {
 		_ = client.send(signalMessage{Type: "ready", From: client.id, Peers: peers, Data: mustJSON(map[string]any{
-			"owner": client.isOwner,
-			"peers": h.peerInfos(roomCode),
-			"name":  clientName(client),
-			"music": h.musicState(roomCode),
+			"owner":      client.isOwner,
+			"peers":      h.peerInfos(roomCode),
+			"name":       clientName(client),
+			"music":      h.musicState(roomCode),
+			"initiative": h.initiativeState(roomCode),
 		})})
 	} else {
 		_ = client.send(signalMessage{Type: "waiting", From: client.id})
@@ -226,10 +239,16 @@ func (h *Hub) handle(client *Client, message signalMessage) {
 		case "music-set", "music-play", "music-pause", "music-seek":
 			h.handleMusicLocked(client, message)
 			return
+		case "initiative-add", "initiative-remove", "initiative-pass":
+			h.handleInitiativeLocked(client, message)
+			return
 		}
 	}
 
 	if message.Type == "music-set" || message.Type == "music-play" || message.Type == "music-pause" || message.Type == "music-seek" {
+		return
+	}
+	if message.Type == "initiative-add" || message.Type == "initiative-remove" || message.Type == "initiative-pass" {
 		return
 	}
 
@@ -247,6 +266,8 @@ func (h *Hub) handle(client *Client, message signalMessage) {
 	if !client.isApproved {
 		if message.Type == "lobby-info" {
 			client.displayName = stringFromJSON(message.Data, "name")
+			client.lobbyRequested = true
+			h.updateMetricsLocked()
 			h.sendPendingListLocked(client.roomCode)
 		}
 		return
@@ -280,13 +301,66 @@ func (h *Hub) approveLocked(owner *Client, pendingID string) {
 		h.markOccupied(owner.roomCode)
 		h.updateMetricsLocked()
 		_ = pendingClient.send(signalMessage{Type: "approved", From: pendingClient.id, Peers: peers, Data: mustJSON(map[string]any{
-			"peers": h.peerInfosLocked(room, pendingClient),
-			"name":  clientName(pendingClient),
-			"music": h.musicStatePayloadLocked(room),
+			"peers":      h.peerInfosLocked(room, pendingClient),
+			"name":       clientName(pendingClient),
+			"music":      h.musicStatePayloadLocked(room),
+			"initiative": h.initiativeStatePayloadLocked(room),
 		})})
 		h.broadcast(pendingClient, signalMessage{Type: "peer-joined", From: pendingClient.id, Data: mustJSON(map[string]any{"name": clientName(pendingClient)})})
 		h.sendPendingListLocked(owner.roomCode)
 		return
+	}
+}
+
+func (h *Hub) handleInitiativeLocked(owner *Client, message signalMessage) {
+	room := h.rooms[owner.roomCode]
+	if room == nil {
+		return
+	}
+
+	switch message.Type {
+	case "initiative-add":
+		name, score, ok := initiativeEntryFromJSON(message.Data)
+		if !ok || name == "" || score < -100 || score > 200 {
+			return
+		}
+		if len(name) > 40 {
+			name = name[:40]
+		}
+		room.initiative.Entries = append(room.initiative.Entries, initiativeEntry{
+			ID:    randomID(),
+			Name:  name,
+			Score: score,
+		})
+		sortInitiativeEntries(room.initiative.Entries)
+		room.initiative.Turn = clampInitiativeTurn(room.initiative.Turn, len(room.initiative.Entries))
+	case "initiative-remove":
+		id := stringFromJSON(message.Data, "id")
+		for index, entry := range room.initiative.Entries {
+			if entry.ID != id {
+				continue
+			}
+			room.initiative.Entries = append(room.initiative.Entries[:index], room.initiative.Entries[index+1:]...)
+			if index < room.initiative.Turn {
+				room.initiative.Turn--
+			}
+			room.initiative.Turn = clampInitiativeTurn(room.initiative.Turn, len(room.initiative.Entries))
+			break
+		}
+	case "initiative-pass":
+		if len(room.initiative.Entries) == 0 {
+			room.initiative.Turn = 0
+			break
+		}
+		room.initiative.Turn = (room.initiative.Turn + 1) % len(room.initiative.Entries)
+	}
+	h.broadcastInitiativeLocked(room)
+}
+
+func (h *Hub) broadcastInitiativeLocked(room *liveRoom) {
+	state := h.initiativeStatePayloadLocked(room)
+	for client := range room.participants {
+		_ = client.send(signalMessage{Type: "initiative-state", Data: mustJSON(state)})
 	}
 }
 
@@ -401,6 +475,25 @@ func (h *Hub) musicState(roomCode string) musicState {
 	return h.musicStatePayloadLocked(room)
 }
 
+func (h *Hub) initiativeState(roomCode string) initiativeState {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	room := h.rooms[roomCode]
+	if room == nil {
+		return initiativeState{}
+	}
+	return h.initiativeStatePayloadLocked(room)
+}
+
+func (h *Hub) initiativeStatePayloadLocked(room *liveRoom) initiativeState {
+	state := initiativeState{
+		Entries: append([]initiativeEntry(nil), room.initiative.Entries...),
+		Turn:    clampInitiativeTurn(room.initiative.Turn, len(room.initiative.Entries)),
+	}
+	return state
+}
+
 func (h *Hub) musicStatePayloadLocked(room *liveRoom) musicState {
 	state := room.music
 	if state.Playing && state.UpdatedAt > 0 {
@@ -418,6 +511,9 @@ func (h *Hub) sendPendingListLocked(roomCode string) {
 	}
 	pending := make([]map[string]string, 0, len(room.pending))
 	for client := range room.pending {
+		if !client.lobbyRequested {
+			continue
+		}
 		name := client.displayName
 		if name == "" {
 			name = "Convidado " + client.id[:4]
@@ -454,6 +550,39 @@ func positionFromJSON(data json.RawMessage, fallback float64) float64 {
 		return fallback
 	}
 	return position
+}
+
+func initiativeEntryFromJSON(data json.RawMessage) (string, int, bool) {
+	var payload struct {
+		Name  string `json:"name"`
+		Score int    `json:"score"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return "", 0, false
+	}
+	return strings.TrimSpace(payload.Name), payload.Score, true
+}
+
+func sortInitiativeEntries(entries []initiativeEntry) {
+	for i := 1; i < len(entries); i++ {
+		current := entries[i]
+		j := i - 1
+		for j >= 0 && entries[j].Score < current.Score {
+			entries[j+1] = entries[j]
+			j--
+		}
+		entries[j+1] = current
+	}
+}
+
+func clampInitiativeTurn(turn int, count int) int {
+	if count <= 0 || turn < 0 {
+		return 0
+	}
+	if turn >= count {
+		return count - 1
+	}
+	return turn
 }
 
 func validYouTubeVideoID(videoID string) bool {
@@ -660,7 +789,11 @@ func (h *Hub) updateMetricsLocked() {
 	pending := 0
 	for _, room := range h.rooms {
 		participants += len(room.participants)
-		pending += len(room.pending)
+		for client := range room.pending {
+			if client.lobbyRequested {
+				pending++
+			}
+		}
 	}
 	observability.SetRoomsActive(rooms)
 	observability.SetParticipantsActive(participants)

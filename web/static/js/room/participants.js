@@ -2,6 +2,10 @@ import { volumeIcon } from "./icons.js";
 import { shortID } from "./identity.js";
 
 export function createParticipants({ dom, isOwner, maxParticipants, knownPeers, peerNames, peerVolumes, send, setPeerVolume }) {
+  let lastPendingCount = 0;
+  let entryAlertTimer;
+  let alertAudioContext;
+
   function createTile(peerID) {
     const frame = document.createElement("div");
     frame.className = "video-frame";
@@ -40,14 +44,16 @@ export function createParticipants({ dom, isOwner, maxParticipants, knownPeers, 
       actions.append(kick);
     }
 
-    label.append(micStatus, name);
-    frame.append(video, label, volumeControl, actions);
+    label.append(name);
+    frame.append(video, label, micStatus, volumeControl, actions);
     dom.stage.append(frame);
     return { frame, video, name, micStatus, volumeControl, volumeSlider, volumeValue };
   }
 
   function renderPending(pending) {
     dom.pendingList.innerHTML = "";
+    if (isOwner && pending.length > lastPendingCount) showEntryAlert(pending);
+    lastPendingCount = pending.length;
     updatePendingBadge(pending.length);
     if (pending.length === 0) {
       dom.pendingList.innerHTML = '<p class="empty-pending">Nenhum convidado aguardando.</p>';
@@ -101,6 +107,41 @@ export function createParticipants({ dom, isOwner, maxParticipants, knownPeers, 
     dom.pendingBadge.textContent = String(count);
   }
 
+  function showEntryAlert(pending) {
+    if (dom.entryAlert) {
+      const guest = pending[pending.length - 1];
+      const name = guest?.name || "Alguem";
+      dom.entryAlert.querySelector("span").textContent = `${name} pediu entrada`;
+      dom.entryAlert.hidden = false;
+      clearTimeout(entryAlertTimer);
+      entryAlertTimer = setTimeout(() => {
+        dom.entryAlert.hidden = true;
+      }, 5200);
+    }
+    playEntrySound();
+  }
+
+  function playEntrySound() {
+    try {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) return;
+      alertAudioContext ||= new AudioContextClass();
+      if (alertAudioContext.state === "suspended") alertAudioContext.resume().catch(() => {});
+      const oscillator = alertAudioContext.createOscillator();
+      const gain = alertAudioContext.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(740, alertAudioContext.currentTime);
+      oscillator.frequency.exponentialRampToValueAtTime(980, alertAudioContext.currentTime + 0.16);
+      gain.gain.setValueAtTime(0.0001, alertAudioContext.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.16, alertAudioContext.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, alertAudioContext.currentTime + 0.26);
+      oscillator.connect(gain).connect(alertAudioContext.destination);
+      oscillator.start();
+      oscillator.stop(alertAudioContext.currentTime + 0.28);
+    } catch {
+    }
+  }
+
   function updateGrid(approved) {
     const total = knownPeers.size + (approved ? 1 : 0);
     dom.stage.dataset.count = String(Math.max(total, 1));
@@ -137,4 +178,3 @@ export function createParticipants({ dom, isOwner, maxParticipants, knownPeers, 
     updatePeerLabel,
   };
 }
-

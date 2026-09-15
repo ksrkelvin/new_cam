@@ -1,7 +1,4 @@
-import { describeSDP } from "./logger.js";
 import { updateMicStatus } from "./media.js";
-
-const mediaTypes = ["audio", "video"];
 
 export function createPeerManager({ peerConfig, knownPeers, peerVolumes, createTile, updateGrid, updatePeerLabel, renderParticipants, getLocalStream, send, logClientEvent }) {
   const peers = new Map();
@@ -13,16 +10,20 @@ export function createPeerManager({ peerConfig, knownPeers, peerVolumes, createT
     if (!knownPeers.has(peerID)) return null;
 
     const localStream = getLocalStream();
-    const queuedCandidates = pendingCandidatesByPeer.get(peerID) || emptyCandidateBuckets();
+    const queuedCandidates = pendingCandidatesByPeer.get(peerID) || [];
     const entry = {
-      connections: {},
+      connection: null,
       tile: createTile(peerID),
       audio: null,
       remoteStream: new MediaStream(),
       pendingCandidates: queuedCandidates,
+      makingOffer: false,
+      restartingIce: false,
+      restartTimer: null,
       watchdogTimers: [],
     };
     pendingCandidatesByPeer.delete(peerID);
+    entry.connection = createMediaConnection(peerID, entry);
     peers.set(peerID, entry);
     logClientEvent("info", "peer-created", {
       peerID,
@@ -33,27 +34,12 @@ export function createPeerManager({ peerConfig, knownPeers, peerVolumes, createT
         muted: track.muted,
         readyState: track.readyState,
       })),
-      queuedAudioCandidates: entry.pendingCandidates.audio.length,
-      queuedVideoCandidates: entry.pendingCandidates.video.length,
+      queuedCandidates: entry.pendingCandidates.length,
     });
     setPeerVolume(peerID, peerVolumes.get(peerID) ?? 100);
 
-    for (const mediaType of mediaTypes) {
-      entry.connections[mediaType] = createMediaConnection(peerID, entry, mediaType);
-    }
-
     if (shouldOffer) {
-      for (const mediaType of mediaTypes) {
-        const connection = entry.connections[mediaType];
-        await connection.setLocalDescription(await connection.createOffer());
-        logClientEvent("info", "signal-offer-sent", {
-          to: peerID,
-          mediaType,
-          signalingState: connection.signalingState,
-          sdpTypes: describeSDP(connection.localDescription?.sdp || ""),
-        });
-        send("offer", peerID, mediaSignal(mediaType, connection.localDescription));
-      }
+      await makeOffer(peerID, entry);
     }
 
     startPeerWatchdog(peerID);
@@ -61,13 +47,13 @@ export function createPeerManager({ peerConfig, knownPeers, peerVolumes, createT
     return entry;
   }
 
-  function createMediaConnection(peerID, entry, mediaType) {
+  function createMediaConnection(peerID, entry) {
     const connection = new RTCPeerConnection(peerConfig);
     const localStream = getLocalStream();
-    const tracks = mediaType === "audio" ? localStream.getAudioTracks() : localStream.getVideoTracks();
-    tracks.forEach((track) => connection.addTrack(track, new MediaStream([track])));
+    addLocalMedia(connection, localStream);
 
     connection.ontrack = (event) => {
+      const mediaType = event.track.kind;
       logClientEvent("info", "remote-track", {
         peerID,
         mediaType,
@@ -82,6 +68,7 @@ export function createPeerManager({ peerConfig, knownPeers, peerVolumes, createT
       entry.remoteStream.addTrack(event.track);
       entry.tile.video.srcObject = entry.remoteStream;
       entry.tile.video.muted = true;
+      entry.tile.frame.classList.toggle("is-audio-only", entry.remoteStream.getVideoTracks().length === 0);
       entry.tile.video.play().catch((error) => {
         logClientEvent("warn", "remote-video-play-error", { peerID, mediaType, name: error.name, message: error.message });
       });
@@ -95,15 +82,14 @@ export function createPeerManager({ peerConfig, knownPeers, peerVolumes, createT
 
     connection.onicecandidate = (event) => {
       if (event.candidate) {
-        logCandidate("local", peerID, mediaType, event.candidate.candidate || "");
-        send("candidate", peerID, mediaSignal(mediaType, event.candidate));
+        logCandidate("local", peerID, event.candidate.candidate || "");
+        send("candidate", peerID, event.candidate);
       }
     };
 
     connection.onconnectionstatechange = () => {
       logClientEvent("info", "peer-connection-state", {
         peerID,
-        mediaType,
         state: connection.connectionState,
         iceConnectionState: connection.iceConnectionState,
         iceGatheringState: connection.iceGatheringState,
@@ -114,67 +100,97 @@ export function createPeerManager({ peerConfig, knownPeers, peerVolumes, createT
           logClientEvent("warn", "peer-stats-error", { peerID, name: error.name, message: error.message });
         });
       }
+      if (connection.connectionState === "failed" || connection.connectionState === "disconnected") scheduleIceRestart(peerID);
       if (connection.connectionState === "closed") removePeer(peerID);
     };
 
     connection.oniceconnectionstatechange = () => {
       logClientEvent("info", "peer-ice-state", {
         peerID,
-        mediaType,
         iceConnectionState: connection.iceConnectionState,
         connectionState: connection.connectionState,
       });
+      if (connection.iceConnectionState === "failed" || connection.iceConnectionState === "disconnected") scheduleIceRestart(peerID);
     };
 
     connection.onicegatheringstatechange = () => {
-      logClientEvent("debug", "peer-ice-gathering-state", { peerID, mediaType, iceGatheringState: connection.iceGatheringState });
+      logClientEvent("debug", "peer-ice-gathering-state", { peerID, iceGatheringState: connection.iceGatheringState });
     };
 
     return connection;
   }
 
+  function addLocalMedia(connection, localStream) {
+    const audioTracks = localStream.getAudioTracks();
+    const videoTracks = localStream.getVideoTracks();
+    if (audioTracks.length === 0) connection.addTransceiver("audio", { direction: "recvonly" });
+    else audioTracks.forEach((track) => configureSender(connection.addTrack(track, new MediaStream([track]))));
+    if (videoTracks.length === 0) connection.addTransceiver("video", { direction: "recvonly" });
+    else videoTracks.forEach((track) => configureSender(connection.addTrack(track, new MediaStream([track]))));
+  }
+
+  function configureSender(sender) {
+    if (sender.track?.kind === "video") {
+      sender.track.contentHint = "motion";
+      const parameters = sender.getParameters();
+      parameters.encodings = parameters.encodings?.length ? parameters.encodings : [{}];
+      parameters.encodings[0].maxBitrate = 450000;
+      sender.setParameters(parameters).catch((error) => {
+        logClientEvent("debug", "sender-parameters-error", { kind: sender.track?.kind, name: error.name, message: error.message });
+      });
+    }
+  }
+
+  async function makeOffer(peerID, entry, options = {}) {
+    if (entry.makingOffer) return;
+    entry.makingOffer = true;
+    try {
+      await entry.connection.setLocalDescription(await entry.connection.createOffer(options));
+      logClientEvent("info", "signal-offer-sent", {
+        to: peerID,
+        restartIce: Boolean(options.iceRestart),
+        signalingState: entry.connection.signalingState,
+      });
+      send("offer", peerID, entry.connection.localDescription);
+    } finally {
+      entry.makingOffer = false;
+    }
+  }
+
   async function handleOffer(message) {
     const entry = await createPeer(message.from, false);
     if (!entry) return;
-    const mediaType = signalMediaType(message);
-    const mediaConnection = entry.connections[mediaType];
+    const mediaConnection = entry.connection;
     logClientEvent("info", "signal-offer-received", {
       from: message.from,
-      mediaType,
       signalingState: mediaConnection.signalingState,
-      sdpTypes: describeSDP(message.data?.sdp || ""),
     });
     if (mediaConnection.signalingState !== "stable") {
-      logClientEvent("warn", "offer-ignored-not-stable", { from: message.from, mediaType, signalingState: mediaConnection.signalingState });
-      return;
+      await mediaConnection.setLocalDescription({ type: "rollback" });
+      await mediaConnection.setRemoteDescription(message.data);
+    } else {
+      await mediaConnection.setRemoteDescription(message.data);
     }
-    await mediaConnection.setRemoteDescription(message.data);
-    await flushPendingCandidates(entry, message.from, mediaType);
+    await flushPendingCandidates(entry, message.from);
     await mediaConnection.setLocalDescription();
     logClientEvent("info", "signal-answer-sent", {
       to: message.from,
-      mediaType,
       signalingState: mediaConnection.signalingState,
-      sdpTypes: describeSDP(mediaConnection.localDescription?.sdp || ""),
     });
-    send("answer", message.from, mediaSignal(mediaType, mediaConnection.localDescription));
+    send("answer", message.from, mediaConnection.localDescription);
   }
 
   async function handleAnswer(message) {
     const entry = peers.get(message.from);
     if (!entry) return;
-    const mediaType = signalMediaType(message);
-    const mediaConnection = entry.connections[mediaType];
+    const mediaConnection = entry.connection;
     logClientEvent("info", "signal-answer-received", {
       from: message.from,
-      mediaType,
       signalingState: mediaConnection.signalingState,
-      sdpTypes: describeSDP(message.data?.sdp || ""),
     });
     if (mediaConnection.signalingState !== "have-local-offer") {
       logClientEvent("warn", "stale-answer-ignored", {
         from: message.from,
-        mediaType,
         signalingState: mediaConnection.signalingState,
         connectionState: mediaConnection.connectionState,
         iceConnectionState: mediaConnection.iceConnectionState,
@@ -182,29 +198,27 @@ export function createPeerManager({ peerConfig, knownPeers, peerVolumes, createT
       return;
     }
     await mediaConnection.setRemoteDescription(message.data);
-    await flushPendingCandidates(entry, message.from, mediaType);
+    await flushPendingCandidates(entry, message.from);
   }
 
   async function handleCandidate(message) {
-    const mediaType = signalMediaType(message);
-    logCandidate("remote", message.from, mediaType, message.data?.candidate || "");
+    logCandidate("remote", message.from, message.data?.candidate || "");
     const entry = peers.get(message.from);
     if (!entry) {
-      queueCandidate(message.from, mediaType, message.data);
+      queueCandidate(message.from, message.data);
       logClientEvent("debug", "ice-candidate-queued-without-peer", {
         from: message.from,
-        mediaType,
-        queued: pendingCandidatesByPeer.get(message.from)?.[mediaType]?.length || 0,
+        queued: pendingCandidatesByPeer.get(message.from)?.length || 0,
       });
       return;
     }
-    const mediaConnection = entry.connections[mediaType];
+    const mediaConnection = entry.connection;
     if (!mediaConnection.remoteDescription) {
-      entry.pendingCandidates[mediaType].push(message.data);
-      logClientEvent("debug", "ice-candidate-queued", { from: message.from, mediaType, queued: entry.pendingCandidates[mediaType].length });
+      entry.pendingCandidates.push(message.data);
+      logClientEvent("debug", "ice-candidate-queued", { from: message.from, queued: entry.pendingCandidates.length });
       return;
     }
-    await addIceCandidate(entry, message.from, mediaType, message.data);
+    await addIceCandidate(entry, message.from, message.data);
   }
 
   function setPeerVolume(peerID, value) {
@@ -254,9 +268,10 @@ export function createPeerManager({ peerConfig, knownPeers, peerVolumes, createT
     }
     entry.audio?.close();
     for (const timer of entry.watchdogTimers || []) clearTimeout(timer);
+    if (entry.restartTimer) clearTimeout(entry.restartTimer);
     entry.tile.frame.remove();
     peers.delete(peerID);
-    for (const connection of Object.values(entry.connections || {})) connection.close();
+    entry.connection?.close();
     updateGrid();
     renderParticipants();
   }
@@ -266,34 +281,44 @@ export function createPeerManager({ peerConfig, knownPeers, peerVolumes, createT
     if (entry) updateMicStatus(entry.tile.micStatus, enabled);
   }
 
+  async function replaceLocalTrack(kind, track) {
+    for (const [peerID, entry] of peers) {
+      const sender = entry.connection.getSenders().find((item) => item.track?.kind === kind);
+      if (!sender) continue;
+      await sender.replaceTrack(track);
+      configureSender(sender);
+      logClientEvent("info", "peer-local-track-replaced", { peerID, kind });
+      scheduleIceRestart(peerID);
+    }
+  }
+
   function refreshPeerLabel(peerID) {
     updatePeerLabel(peerID, peers.get(peerID));
   }
 
-  async function flushPendingCandidates(entry, peerID, mediaType) {
-    const candidates = entry.pendingCandidates[mediaType].splice(0);
-    for (const candidate of candidates) await addIceCandidate(entry, peerID, mediaType, candidate);
-    if (candidates.length > 0) logClientEvent("debug", "ice-candidates-flushed", { peerID, mediaType, count: candidates.length });
+  async function flushPendingCandidates(entry, peerID) {
+    const candidates = entry.pendingCandidates.splice(0);
+    for (const candidate of candidates) await addIceCandidate(entry, peerID, candidate);
+    if (candidates.length > 0) logClientEvent("debug", "ice-candidates-flushed", { peerID, count: candidates.length });
   }
 
-  function queueCandidate(peerID, mediaType, candidate) {
-    const candidates = pendingCandidatesByPeer.get(peerID) || emptyCandidateBuckets();
-    candidates[mediaType].push(candidate);
+  function queueCandidate(peerID, candidate) {
+    const candidates = pendingCandidatesByPeer.get(peerID) || [];
+    candidates.push(candidate);
     pendingCandidatesByPeer.set(peerID, candidates);
   }
 
-  async function addIceCandidate(entry, peerID, mediaType, candidate) {
+  async function addIceCandidate(entry, peerID, candidate) {
     try {
-      await entry.connections[mediaType].addIceCandidate(candidate);
+      await entry.connection.addIceCandidate(candidate);
     } catch (error) {
       logClientEvent("warn", "ice-candidate-error", {
         peerID,
-        mediaType,
         name: error.name,
         message: error.message,
-        connectionState: entry.connections[mediaType].connectionState,
-        iceConnectionState: entry.connections[mediaType].iceConnectionState,
-        signalingState: entry.connections[mediaType].signalingState,
+        connectionState: entry.connection.connectionState,
+        iceConnectionState: entry.connection.iceConnectionState,
+        signalingState: entry.connection.signalingState,
       });
     }
   }
@@ -305,17 +330,15 @@ export function createPeerManager({ peerConfig, knownPeers, peerVolumes, createT
       const timer = setTimeout(() => {
         const currentEntry = peers.get(peerID);
         if (!currentEntry) return;
-        for (const [mediaType, connection] of Object.entries(currentEntry.connections)) {
-          logClientEvent("warn", "peer-connect-watchdog", {
-            peerID,
-            mediaType,
-            delay,
-            connectionState: connection.connectionState,
-            iceConnectionState: connection.iceConnectionState,
-            iceGatheringState: connection.iceGatheringState,
-            signalingState: connection.signalingState,
-          });
-        }
+        const connection = currentEntry.connection;
+        logClientEvent("warn", "peer-connect-watchdog", {
+          peerID,
+          delay,
+          connectionState: connection.connectionState,
+          iceConnectionState: connection.iceConnectionState,
+          iceGatheringState: connection.iceGatheringState,
+          signalingState: connection.signalingState,
+        });
         logPeerStats(peerID).catch((error) => {
           logClientEvent("warn", "peer-stats-error", { peerID, name: error.name, message: error.message });
         });
@@ -327,18 +350,18 @@ export function createPeerManager({ peerConfig, knownPeers, peerVolumes, createT
   async function logPeerStats(peerID) {
     const entry = peers.get(peerID);
     if (!entry) return;
+    const reports = await entry.connection.getStats();
     const summary = { peerID, audio: peerStatsSummary(), video: peerStatsSummary() };
-    for (const mediaType of mediaTypes) {
-      const reports = await entry.connections[mediaType].getStats();
-      const mediaSummary = summary[mediaType];
-      for (const report of reports.values()) {
-        if (report.type === "candidate-pair" && (report.selected || report.nominated)) {
-          mediaSummary.selectedPairState = report.state || "";
-          const localCandidate = reports.get(report.localCandidateId);
-          const remoteCandidate = reports.get(report.remoteCandidateId);
-          mediaSummary.localCandidateType = localCandidate?.candidateType || "";
-          mediaSummary.remoteCandidateType = remoteCandidate?.candidateType || "";
-        }
+    for (const report of reports.values()) {
+      if (report.type === "candidate-pair" && (report.selected || report.nominated)) {
+        summary.selectedPairState = report.state || "";
+        const localCandidate = reports.get(report.localCandidateId);
+        const remoteCandidate = reports.get(report.remoteCandidateId);
+        summary.localCandidateType = localCandidate?.candidateType || "";
+        summary.remoteCandidateType = remoteCandidate?.candidateType || "";
+      }
+      if (report.type === "inbound-rtp" || report.type === "outbound-rtp") {
+        const mediaSummary = report.kind === "audio" ? summary.audio : summary.video;
         if (report.type === "inbound-rtp") mediaSummary.inboundPackets += report.packetsReceived || 0;
         if (report.type === "outbound-rtp") mediaSummary.outboundPackets += report.packetsSent || 0;
       }
@@ -346,10 +369,29 @@ export function createPeerManager({ peerConfig, knownPeers, peerVolumes, createT
     logClientEvent("info", "peer-stats", summary);
   }
 
-  function logCandidate(direction, peerID, mediaType, candidate) {
+  function scheduleIceRestart(peerID) {
+    const entry = peers.get(peerID);
+    if (!entry || entry.restartTimer || entry.restartingIce) return;
+    entry.restartTimer = setTimeout(async () => {
+      entry.restartTimer = null;
+      const currentEntry = peers.get(peerID);
+      if (!currentEntry || currentEntry.connection.signalingState !== "stable") return;
+      currentEntry.restartingIce = true;
+      try {
+        logClientEvent("warn", "peer-ice-restart", { peerID });
+        await makeOffer(peerID, currentEntry, { iceRestart: true });
+      } catch (error) {
+        logClientEvent("warn", "peer-ice-restart-error", { peerID, name: error.name, message: error.message });
+      } finally {
+        currentEntry.restartingIce = false;
+      }
+    }, 1200);
+  }
+
+  function logCandidate(direction, peerID, candidate) {
     const candidateType = candidate.match(/ typ ([a-z]+)/)?.[1] || "";
     const protocol = candidate.match(/ (udp|tcp) /i)?.[1] || "";
-    logClientEvent("debug", "ice-candidate", { direction, peerID, mediaType, candidateType, protocol });
+    logClientEvent("debug", "ice-candidate", { direction, peerID, candidateType, protocol });
   }
 
   return {
@@ -358,32 +400,13 @@ export function createPeerManager({ peerConfig, knownPeers, peerVolumes, createT
     handleAnswer,
     handleCandidate,
     removePeer,
+    replaceLocalTrack,
     setPeerVolume,
     updateRemoteMic,
     updatePeerLabel: refreshPeerLabel,
     peerCount: () => peers.size,
     peerIDs: () => Array.from(peers.keys()),
   };
-}
-
-function emptyCandidateBuckets() {
-  return { audio: [], video: [] };
-}
-
-function signalMediaType(message) {
-  return mediaTypes.includes(message.data?.mediaType) ? message.data.mediaType : "video";
-}
-
-function mediaSignal(mediaType, descriptionOrCandidate) {
-  const payload = descriptionOrCandidate?.toJSON?.() || {
-    type: descriptionOrCandidate?.type,
-    sdp: descriptionOrCandidate?.sdp,
-    candidate: descriptionOrCandidate?.candidate,
-    sdpMid: descriptionOrCandidate?.sdpMid,
-    sdpMLineIndex: descriptionOrCandidate?.sdpMLineIndex,
-    usernameFragment: descriptionOrCandidate?.usernameFragment,
-  };
-  return { ...payload, mediaType };
 }
 
 function peerStatsSummary() {
