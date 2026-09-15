@@ -23,6 +23,8 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 	templates := template.Must(template.ParseGlob("web/templates/*.html"))
 	router.SetHTMLTemplate(templates)
 	router.Static("/static", "web/static")
+	router.StaticFile("/room-create-bg.png", "web/11e5e664-bd50-4efe-90cf-67661cc8d608.png")
+	router.StaticFile("/room-call-bg.png", "web/08ce0f1d-bfc1-48f4-9c97-a616342cda13.png")
 	router.GET("/metrics", gin.WrapH(http.HandlerFunc(observability.Handler)))
 	router.POST("/client-logs", ClientLog)
 
@@ -51,6 +53,5 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 		hub.Serve(ctx.Writer, ctx.Request, joinedRoom.Code, ownerToken == joinedRoom.OwnerToken, guestToken, guestApproved)
 	})
 
-	_ = cfg
 	return router
 }

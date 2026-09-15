@@ -1,0 +1,2 @@
+ALTER TABLE rooms
+ADD COLUMN name TEXT NOT NULL DEFAULT 'Sala sem nome';

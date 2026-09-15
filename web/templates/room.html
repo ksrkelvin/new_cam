@@ -4,31 +4,40 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sala {{.Room.Code}} | We Cam</title>
-  <link rel="stylesheet" href="/static/css/app.css?v=20260913-5">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <link rel="stylesheet" href="/static/css/app.css?v=20260915-8">
 </head>
 <body data-room-code="{{.Room.Code}}" data-is-owner="{{.IsOwner}}">
   <main class="room-shell">
     <header class="room-header">
-      <a href="/" class="brand">We Cam</a>
-      <div class="room-code">
-        <span>Sala</span>
-        <strong>{{.Room.Code}}</strong>
+      <a href="/" class="brand" aria-label="We Cam">
+        <span class="brand-mark">W</span>
+        <span>
+          <strong>{{.Room.Name}}</strong>
+          <small>We Cam &bull; Sala privada</small>
+        </span>
+      </a>
+      <div class="header-actions">
+        <div class="room-code">
+          <span>Sala</span>
+          <strong>{{.Room.Code}}</strong>
+        </div>
+        <div class="room-code">
+          <span>Pessoas</span>
+          <strong id="participant-count">1/10</strong>
+        </div>
+        <button type="button" id="share-room" class="icon-button" aria-label="Compartilhar sala"><i class="fa-solid fa-link" aria-hidden="true"></i></button>
       </div>
-      <div class="room-code">
-        <span>Pessoas</span>
-        <strong id="participant-count">1/10</strong>
-      </div>
-      {{if .IsOwner}}
-      <button type="button" id="toggle-owner-panel" class="secondary-button" aria-expanded="false">Gerenciar <span id="pending-badge" hidden>0</span></button>
-      {{end}}
-      <button type="button" id="share-room">Compartilhar sala</button>
-      <button type="button" id="leave-room" class="danger-button">Sair</button>
     </header>
 
-    <section class="stage" id="stage">
-      <div class="video-frame" data-peer-id="local">
-        <video id="local-video" autoplay muted playsinline></video>
-        <span class="camera-label">
+    <div class="room-layout">
+      <section class="stage" id="stage">
+        <div class="video-frame is-local" data-peer-id="local">
+          <video id="local-video" autoplay muted playsinline></video>
+          <span class="camera-label">
+            <span class="crown"><i class="fa-solid fa-crown" aria-hidden="true"></i></span>
+            <span id="local-state">Camera local</span>
+          </span>
           <span id="local-mic-status" class="mic-icon is-on" aria-label="Microfone ligado">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3Z"></path>
@@ -37,22 +46,32 @@
               <path d="M8 21h8"></path>
             </svg>
           </span>
-          <span id="local-state">Camera local</span>
-        </span>
-      </div>
-    </section>
+        </div>
+      </section>
+
+      {{if .IsOwner}}
+      <aside class="table-sidebar" aria-label="Gerenciamento da sala">
+        <section class="sidebar-card owner-panel is-open" id="owner-panel" aria-hidden="false">
+          <h2>
+            <span><i class="fa-solid fa-users" aria-hidden="true"></i></span>
+            Participantes
+          </h2>
+          <div id="participant-list" class="participant-list"></div>
+          <h2>
+            <span><i class="fa-solid fa-user-clock" aria-hidden="true"></i></span>
+            Aguardando entrada <span id="pending-badge" class="sidebar-badge" hidden>0</span>
+          </h2>
+          <div id="pending-list" class="pending-list"></div>
+        </section>
+      </aside>
+      {{end}}
+    </div>
 
     <footer class="controls">
-      <button type="button" id="toggle-camera">Desligar camera</button>
-      <button type="button" id="toggle-mic">Desligar microfone</button>
+      <button type="button" id="toggle-mic" class="control-button" aria-label="Desligar microfone"><i class="fa-solid fa-microphone" aria-hidden="true"></i></button>
+      <button type="button" id="toggle-camera" class="control-button" aria-label="Desligar camera"><i class="fa-solid fa-video" aria-hidden="true"></i></button>
+      <button type="button" id="leave-room" class="control-button danger-button" aria-label="Sair"><i class="fa-solid fa-phone-slash" aria-hidden="true"></i></button>
     </footer>
-
-    <aside class="owner-panel" id="owner-panel" aria-hidden="true">
-      <h2>Participantes</h2>
-      <div id="participant-list" class="participant-list"></div>
-      <h2>Aguardando entrada</h2>
-      <div id="pending-list" class="pending-list"></div>
-    </aside>
 
     <section class="lobby" id="lobby" hidden>
       <div class="lobby-panel">
@@ -70,6 +89,6 @@
       </div>
     </section>
   </main>
-  <script src="/static/js/room.js?v=20260913-7"></script>
+  <script src="/static/js/room.js?v=20260915-8"></script>
 </body>
 </html>

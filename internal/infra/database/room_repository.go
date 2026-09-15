@@ -3,9 +3,11 @@ package database
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"we_cam/internal/domain/room"
 	"we_cam/internal/infra/database/db"
@@ -19,12 +21,12 @@ func NewRoomRepository(pool db.DBTX) *RoomRepository {
 	return &RoomRepository{queries: db.New(pool)}
 }
 
-func (r *RoomRepository) Create(ctx context.Context, code string, ownerToken string) (room.Room, error) {
-	model, err := r.queries.CreateRoom(ctx, db.CreateRoomParams{Code: code, OwnerToken: ownerToken})
+func (r *RoomRepository) Create(ctx context.Context, code string, name string, ownerToken string) (room.Room, error) {
+	model, err := r.queries.CreateRoom(ctx, db.CreateRoomParams{Code: code, Name: name, OwnerToken: ownerToken})
 	if err != nil {
 		return room.Room{}, err
 	}
-	return toDomainRoom(model), nil
+	return createRoomRowToDomain(model), nil
 }
 
 func (r *RoomRepository) FindByCode(ctx context.Context, code string) (room.Room, error) {
@@ -35,7 +37,7 @@ func (r *RoomRepository) FindByCode(ctx context.Context, code string) (room.Room
 	if err != nil {
 		return room.Room{}, err
 	}
-	return toDomainRoom(model), nil
+	return findRoomRowToDomain(model), nil
 }
 
 func (r *RoomRepository) Delete(ctx context.Context, code string) error {
@@ -67,12 +69,38 @@ func IsUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
-func toDomainRoom(model db.Room) room.Room {
+func createRoomRowToDomain(model db.CreateRoomRow) room.Room {
 	return room.Room{
 		ID:          model.ID,
 		Code:        model.Code,
+		Name:        model.Name,
 		OwnerToken:  model.OwnerToken,
-		LastEmptyAt: model.LastEmptyAt,
-		CreatedAt:   model.CreatedAt,
+		LastEmptyAt: timePtr(model.LastEmptyAt),
+		CreatedAt:   timeValue(model.CreatedAt),
 	}
+}
+
+func findRoomRowToDomain(model db.FindRoomByCodeRow) room.Room {
+	return room.Room{
+		ID:          model.ID,
+		Code:        model.Code,
+		Name:        model.Name,
+		OwnerToken:  model.OwnerToken,
+		LastEmptyAt: timePtr(model.LastEmptyAt),
+		CreatedAt:   timeValue(model.CreatedAt),
+	}
+}
+
+func timePtr(value pgtype.Timestamptz) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+	return &value.Time
+}
+
+func timeValue(value pgtype.Timestamptz) time.Time {
+	if !value.Valid {
+		return time.Time{}
+	}
+	return value.Time
 }

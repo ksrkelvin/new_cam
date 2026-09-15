@@ -1,4 +1,5 @@
 const maxParticipants = 10;
+const appVersion = "20260915-8";
 const roomCode = document.body.dataset.roomCode;
 const isOwner = document.body.dataset.isOwner === "true";
 const stage = document.querySelector("#stage");
@@ -10,7 +11,6 @@ const toggleCamera = document.querySelector("#toggle-camera");
 const toggleMic = document.querySelector("#toggle-mic");
 const shareRoom = document.querySelector("#share-room");
 const leaveRoom = document.querySelector("#leave-room");
-const toggleOwnerPanel = document.querySelector("#toggle-owner-panel");
 const ownerPanel = document.querySelector("#owner-panel");
 const pendingBadge = document.querySelector("#pending-badge");
 const participantList = document.querySelector("#participant-list");
@@ -31,18 +31,26 @@ const socketProtocol = window.location.protocol === "https:" ? "wss" : "ws";
 const socketURL = new URL(`${socketProtocol}://${window.location.host}/ws/rooms/${roomCode}`);
 if (guestToken) socketURL.searchParams.set("guest_token", guestToken);
 const socket = new WebSocket(socketURL);
-logClientEvent("info", "room-script-loaded", { isOwner, roomCode, connection: connectionInfo() });
+logClientEvent("info", "room-script-loaded", { version: appVersion, isOwner, roomCode, connection: connectionInfo() });
 
 const peerConfig = {
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+  iceCandidatePoolSize: 4,
 };
+logClientEvent("info", "ice-config", {
+  iceServers: peerConfig.iceServers.map((server) => ({
+    urls: server.urls,
+  })),
+});
 
 const peers = new Map();
 const knownPeers = new Set();
 const peerNames = new Map();
 const peerVolumes = new Map();
+const pendingCandidatesByPeer = new Map();
 let audioContext;
 let localStream;
+let localMediaPromise;
 let selfID = "";
 let micEnabled = true;
 let approved = isOwner;
@@ -54,9 +62,17 @@ if (!isOwner) {
 }
 
 socket.addEventListener("message", async (event) => {
-  const message = JSON.parse(event.data);
-  logClientEvent("debug", "websocket-message", { type: message.type, from: message.from, to: message.to });
+  try {
+    const message = JSON.parse(event.data);
+    logClientEvent("debug", "websocket-message", { type: message.type, from: message.from, to: message.to });
+    await handleSignalMessage(message);
+  } catch (error) {
+    logClientEvent("error", "signal-handler-error", { name: error.name, message: error.message });
+    showMediaProblem(error);
+  }
+});
 
+async function handleSignalMessage(message) {
   if (message.type === "room-full") {
     showRoomFull();
     return;
@@ -103,7 +119,7 @@ socket.addEventListener("message", async (event) => {
   }
 
   if (message.type === "owner-replaced") {
-    ownerPanel.hidden = true;
+    if (ownerPanel) ownerPanel.hidden = true;
     return;
   }
 
@@ -142,20 +158,78 @@ socket.addEventListener("message", async (event) => {
 
   if (message.type === "offer") {
     knownPeers.add(message.from);
+    await ensureMedia();
     const entry = await createPeer(message.from, false);
     if (!entry) return;
+    logClientEvent("info", "signal-offer-received", {
+      from: message.from,
+      signalingState: entry.connection.signalingState,
+      sdpTypes: describeSDP(message.data?.sdp || ""),
+    });
+    if (entry.connection.signalingState !== "stable") {
+      logClientEvent("warn", "offer-ignored-not-stable", {
+        from: message.from,
+        signalingState: entry.connection.signalingState,
+      });
+      return;
+    }
     await entry.connection.setRemoteDescription(message.data);
+    await flushPendingCandidates(entry, message.from);
     await entry.connection.setLocalDescription();
+    logClientEvent("info", "signal-answer-sent", {
+      to: message.from,
+      signalingState: entry.connection.signalingState,
+      sdpTypes: describeSDP(entry.connection.localDescription?.sdp || ""),
+    });
     send("answer", message.from, entry.connection.localDescription);
+    return;
+  }
+
+  if (message.type === "candidate") {
+    logCandidate("remote", message.from, message.data?.candidate || "");
+    const candidateEntry = peers.get(message.from);
+    if (!candidateEntry) {
+      queueCandidate(message.from, message.data);
+      logClientEvent("debug", "ice-candidate-queued-without-peer", {
+        from: message.from,
+        queued: pendingCandidatesByPeer.get(message.from)?.length || 0,
+      });
+      return;
+    }
+    if (!candidateEntry.connection.remoteDescription) {
+      candidateEntry.pendingCandidates.push(message.data);
+      logClientEvent("debug", "ice-candidate-queued", {
+        from: message.from,
+        queued: candidateEntry.pendingCandidates.length,
+      });
+      return;
+    }
+    await addIceCandidate(candidateEntry, message.from, message.data);
     return;
   }
 
   const entry = peers.get(message.from);
   if (!entry) return;
 
-  if (message.type === "answer") await entry.connection.setRemoteDescription(message.data);
-  if (message.type === "candidate") await entry.connection.addIceCandidate(message.data);
-});
+  if (message.type === "answer") {
+    logClientEvent("info", "signal-answer-received", {
+      from: message.from,
+      signalingState: entry.connection.signalingState,
+      sdpTypes: describeSDP(message.data?.sdp || ""),
+    });
+    if (entry.connection.signalingState !== "have-local-offer") {
+      logClientEvent("warn", "stale-answer-ignored", {
+        from: message.from,
+        signalingState: entry.connection.signalingState,
+        connectionState: entry.connection.connectionState,
+        iceConnectionState: entry.connection.iceConnectionState,
+      });
+      return;
+    }
+    await entry.connection.setRemoteDescription(message.data);
+    await flushPendingCandidates(entry, message.from);
+  }
+}
 
 socket.addEventListener("open", () => {
   logClientEvent("info", "websocket-open", { url: socketURL.pathname, connection: connectionInfo() });
@@ -176,6 +250,30 @@ socket.addEventListener("error", () => {
 
 async function ensureMedia() {
   if (localStream) return;
+  if (localMediaPromise) {
+    await localMediaPromise;
+    return;
+  }
+  localMediaPromise = openLocalMedia();
+  try {
+    await localMediaPromise;
+  } finally {
+    localMediaPromise = null;
+  }
+}
+
+async function openLocalMedia() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    const error = new Error("getUserMedia indisponivel");
+    error.name = "MediaDevicesUnavailable";
+    throw error;
+  }
+  if (!window.isSecureContext) {
+    const error = new Error("camera e microfone exigem HTTPS ou localhost");
+    error.name = "InsecureContext";
+    throw error;
+  }
+  await logPermissionState();
   try {
     localStream = await navigator.mediaDevices.getUserMedia({
       video: true,
@@ -187,6 +285,7 @@ async function ensureMedia() {
     });
   } catch (error) {
     logClientEvent("error", "media-error", { name: error.name, message: error.message });
+    showMediaProblem(error);
     throw error;
   }
   micEnabled = localStream.getAudioTracks()[0]?.enabled ?? false;
@@ -206,23 +305,57 @@ async function createPeer(peerID, shouldOffer) {
 
   const tile = createTile(peerID);
   const connection = new RTCPeerConnection(peerConfig);
-  const entry = { connection, tile, audio: null };
+  const entry = {
+    connection,
+    tile,
+    audio: null,
+    pendingCandidates: pendingCandidatesByPeer.get(peerID) || [],
+    watchdogTimers: [],
+  };
+  pendingCandidatesByPeer.delete(peerID);
   peers.set(peerID, entry);
+  logClientEvent("info", "peer-created", {
+    peerID,
+    shouldOffer,
+    localTracks: localStream.getTracks().map((track) => ({
+      kind: track.kind,
+      enabled: track.enabled,
+      muted: track.muted,
+      readyState: track.readyState,
+    })),
+    queuedCandidates: entry.pendingCandidates.length,
+  });
   setPeerVolume(peerID, peerVolumes.get(peerID) ?? 100);
 
   localStream.getTracks().forEach((track) => connection.addTrack(track, localStream));
 
   connection.ontrack = (event) => {
     const [stream] = event.streams;
+    logClientEvent("info", "remote-track", {
+      peerID,
+      kind: event.track.kind,
+      muted: event.track.muted,
+      readyState: event.track.readyState,
+      streamTracks: stream?.getTracks().map((track) => ({ kind: track.kind, muted: track.muted, readyState: track.readyState })) || [],
+    });
+    event.track.addEventListener("unmute", () => logClientEvent("info", "remote-track-unmute", { peerID, kind: event.track.kind }));
+    event.track.addEventListener("mute", () => logClientEvent("warn", "remote-track-mute", { peerID, kind: event.track.kind }));
+    event.track.addEventListener("ended", () => logClientEvent("warn", "remote-track-ended", { peerID, kind: event.track.kind }));
     tile.video.srcObject = stream;
     tile.video.muted = true;
+    tile.video.play().catch((error) => {
+      logClientEvent("warn", "remote-video-play-error", { peerID, name: error.name, message: error.message });
+    });
     updatePeerLabel(peerID);
     entry.audio ||= createAudioController(stream);
     setPeerVolume(peerID, peerVolumes.get(peerID) ?? 100);
   };
 
   connection.onicecandidate = (event) => {
-    if (event.candidate) send("candidate", peerID, event.candidate);
+    if (event.candidate) {
+      logCandidate("local", peerID, event.candidate.candidate || "");
+      send("candidate", peerID, event.candidate);
+    }
   };
 
   connection.onconnectionstatechange = () => {
@@ -233,6 +366,11 @@ async function createPeer(peerID, shouldOffer) {
       iceGatheringState: connection.iceGatheringState,
       signalingState: connection.signalingState,
     });
+    if (connection.connectionState === "connected") {
+      logPeerStats(peerID).catch((error) => {
+        logClientEvent("warn", "peer-stats-error", { peerID, name: error.name, message: error.message });
+      });
+    }
     if (["failed", "closed"].includes(connection.connectionState)) removePeer(peerID);
   };
 
@@ -253,9 +391,15 @@ async function createPeer(peerID, shouldOffer) {
 
   if (shouldOffer) {
     await connection.setLocalDescription(await connection.createOffer());
+    logClientEvent("info", "signal-offer-sent", {
+      to: peerID,
+      signalingState: connection.signalingState,
+      sdpTypes: describeSDP(connection.localDescription?.sdp || ""),
+    });
     send("offer", peerID, connection.localDescription);
   }
 
+  startPeerWatchdog(peerID);
   updateGrid();
   return entry;
 }
@@ -410,6 +554,7 @@ function removePeer(peerID) {
     return;
   }
   entry.audio?.close();
+  for (const timer of entry.watchdogTimers || []) clearTimeout(timer);
   entry.connection.close();
   entry.tile.frame.remove();
   peers.delete(peerID);
@@ -420,6 +565,37 @@ function removePeer(peerID) {
 function send(type, to = "", data) {
   if (socket.readyState !== WebSocket.OPEN) return;
   socket.send(JSON.stringify({ type, to, data }));
+}
+
+async function flushPendingCandidates(entry, peerID) {
+  const candidates = entry.pendingCandidates.splice(0);
+  for (const candidate of candidates) {
+    await addIceCandidate(entry, peerID, candidate);
+  }
+  if (candidates.length > 0) {
+    logClientEvent("debug", "ice-candidates-flushed", { peerID, count: candidates.length });
+  }
+}
+
+function queueCandidate(peerID, candidate) {
+  const candidates = pendingCandidatesByPeer.get(peerID) || [];
+  candidates.push(candidate);
+  pendingCandidatesByPeer.set(peerID, candidates);
+}
+
+async function addIceCandidate(entry, peerID, candidate) {
+  try {
+    await entry.connection.addIceCandidate(candidate);
+  } catch (error) {
+    logClientEvent("warn", "ice-candidate-error", {
+      peerID,
+      name: error.name,
+      message: error.message,
+      connectionState: entry.connection.connectionState,
+      iceConnectionState: entry.connection.iceConnectionState,
+      signalingState: entry.connection.signalingState,
+    });
+  }
 }
 
 function updateGrid() {
@@ -447,23 +623,25 @@ function updateMicStatus(element, enabled) {
 }
 
 function micOnIcon() {
-  return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3Z"></path><path d="M19 11a7 7 0 0 1-14 0"></path><path d="M12 18v3"></path><path d="M8 21h8"></path></svg>';
+  return '<i class="fa-solid fa-microphone" aria-hidden="true"></i>';
 }
 
 function micOffIcon() {
-  return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m2 2 20 20"></path><path d="M9 9v2a3 3 0 0 0 5.12 2.12"></path><path d="M15 9.34V6a3 3 0 0 0-5.94-.6"></path><path d="M17 16.95A7 7 0 0 1 5 11"></path><path d="M19 11a6.97 6.97 0 0 1-1.2 3.92"></path><path d="M12 18v3"></path><path d="M8 21h8"></path></svg>';
+  return '<i class="fa-solid fa-microphone-slash" aria-hidden="true"></i>';
 }
 
 function volumeIconSVG() {
-  return '<span class="volume-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5Z"></path><path d="M15.5 8.5a5 5 0 0 1 0 7"></path><path d="M18.5 5.5a9 9 0 0 1 0 13"></path></svg></span>';
+  return '<span class="volume-icon"><i class="fa-solid fa-volume-high" aria-hidden="true"></i></span>';
 }
 
 function setCameraEnabled(enabled) {
   const track = localStream?.getVideoTracks()[0];
   if (!track) return;
   track.enabled = enabled;
-  toggleCamera.textContent = enabled ? "Desligar camera" : "Ligar camera";
-  lobbyToggleCamera.textContent = toggleCamera.textContent;
+  toggleCamera.innerHTML = enabled ? '<i class="fa-solid fa-video" aria-hidden="true"></i>' : '<i class="fa-solid fa-video-slash" aria-hidden="true"></i>';
+  toggleCamera.setAttribute("aria-label", enabled ? "Desligar camera" : "Ligar camera");
+  toggleCamera.classList.toggle("is-off", !enabled);
+  lobbyToggleCamera.textContent = enabled ? "Desligar camera" : "Ligar camera";
 }
 
 function setMicEnabled(enabled) {
@@ -473,8 +651,9 @@ function setMicEnabled(enabled) {
   micEnabled = enabled;
   updateMicStatus(localMicStatus, micEnabled);
   send("media-state", "", { micEnabled });
-  toggleMic.textContent = enabled ? "Desligar microfone" : "Ligar microfone";
-  lobbyToggleMic.textContent = toggleMic.textContent;
+  toggleMic.innerHTML = enabled ? micOnIcon() : micOffIcon();
+  toggleMic.setAttribute("aria-label", enabled ? "Desligar microfone" : "Ligar microfone");
+  lobbyToggleMic.textContent = enabled ? "Desligar microfone" : "Ligar microfone";
   toggleMic.classList.toggle("danger-button", !enabled);
   lobbyToggleMic.classList.toggle("danger-button", !enabled);
 }
@@ -485,12 +664,17 @@ lobbyToggleCamera.addEventListener("click", () => setCameraEnabled(!(localStream
 lobbyToggleMic.addEventListener("click", () => setMicEnabled(!(localStream?.getAudioTracks()[0]?.enabled ?? false)));
 
 requestEntry.addEventListener("click", async () => {
-  await ensureMedia();
-  const name = guestName.value.trim() || "Convidado";
-  localStorage.setItem(guestNameKey, name);
-  send("lobby-info", "", { name });
-  requestEntry.disabled = true;
-  lobbyStatus.textContent = "Aguardando autorizacao do criador da sala.";
+  try {
+    await ensureMedia();
+    const name = guestName.value.trim() || "Convidado";
+    localStorage.setItem(guestNameKey, name);
+    send("lobby-info", "", { name });
+    requestEntry.disabled = true;
+    lobbyStatus.textContent = "Aguardando autorizacao do criador da sala.";
+  } catch (error) {
+    logClientEvent("error", "request-entry-media-error", { name: error.name, message: error.message });
+    showMediaProblem(error);
+  }
 });
 
 shareRoom.addEventListener("click", async () => {
@@ -500,21 +684,15 @@ shareRoom.addEventListener("click", async () => {
     return;
   }
   await navigator.clipboard.writeText(url);
-  shareRoom.textContent = "Link copiado";
+  shareRoom.innerHTML = '<i class="fa-solid fa-check" aria-hidden="true"></i>';
   setTimeout(() => {
-    shareRoom.textContent = "Compartilhar sala";
+    shareRoom.innerHTML = '<i class="fa-solid fa-link" aria-hidden="true"></i>';
   }, 1400);
 });
 
 leaveRoom.addEventListener("click", () => {
   leaveCurrentRoom();
   window.location.href = "/";
-});
-
-toggleOwnerPanel?.addEventListener("click", () => {
-  const isOpen = ownerPanel.classList.toggle("is-open");
-  ownerPanel.setAttribute("aria-hidden", String(!isOpen));
-  toggleOwnerPanel.setAttribute("aria-expanded", String(isOpen));
 });
 
 window.addEventListener("beforeunload", leaveCurrentRoom);
@@ -530,8 +708,45 @@ function leaveCurrentRoom() {
 
 ensureMedia().catch(() => {
   localState.textContent = "Permita o acesso a camera";
-  lobbyStatus.textContent = "Permita camera e microfone para continuar.";
 });
+
+async function logPermissionState() {
+  if (!navigator.permissions?.query) return;
+  const states = {};
+  for (const name of ["camera", "microphone"]) {
+    try {
+      states[name] = (await navigator.permissions.query({ name })).state;
+    } catch (error) {
+      states[name] = `unknown:${error.name}`;
+    }
+  }
+  logClientEvent("info", "permission-state", states);
+}
+
+function showMediaProblem(error) {
+  const message = mediaProblemMessage(error);
+  localState.textContent = message;
+  if (lobbyStatus) lobbyStatus.textContent = message;
+}
+
+function mediaProblemMessage(error) {
+  if (error.name === "NotAllowedError" || error.name === "PermissionDeniedError") {
+    return "Permissao de camera ou microfone bloqueada neste navegador.";
+  }
+  if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError") {
+    return "Camera ou microfone nao encontrado no celular.";
+  }
+  if (error.name === "NotReadableError" || error.name === "TrackStartError") {
+    return "Camera ou microfone esta ocupado por outro app.";
+  }
+  if (error.name === "OverconstrainedError" || error.name === "ConstraintNotSatisfiedError") {
+    return "O celular nao aceitou a configuracao de camera.";
+  }
+  if (error.name === "InsecureContext" || error.name === "MediaDevicesUnavailable") {
+    return "Abra a sala em HTTPS para liberar camera e microfone.";
+  }
+  return "Nao foi possivel acessar camera e microfone.";
+}
 
 function getOrCreateGuestToken() {
   const existingToken = localStorage.getItem(guestTokenKey);
@@ -610,4 +825,78 @@ function connectionInfo() {
     rtt: connection.rtt,
     saveData: connection.saveData,
   };
+}
+
+function logCandidate(direction, peerID, candidate) {
+  const candidateType = candidate.match(/ typ ([a-z]+)/)?.[1] || "";
+  const protocol = candidate.match(/ (udp|tcp) /i)?.[1] || "";
+  logClientEvent("debug", "ice-candidate", { direction, peerID, candidateType, protocol });
+}
+
+function startPeerWatchdog(peerID) {
+  const entry = peers.get(peerID);
+  if (!entry) return;
+
+  for (const delay of [8000, 15000]) {
+    const timer = setTimeout(() => {
+      const currentEntry = peers.get(peerID);
+      if (!currentEntry) return;
+      logClientEvent("warn", "peer-connect-watchdog", {
+        peerID,
+        delay,
+        connectionState: currentEntry.connection.connectionState,
+        iceConnectionState: currentEntry.connection.iceConnectionState,
+        iceGatheringState: currentEntry.connection.iceGatheringState,
+        signalingState: currentEntry.connection.signalingState,
+      });
+      logPeerStats(peerID).catch((error) => {
+        logClientEvent("warn", "peer-stats-error", { peerID, name: error.name, message: error.message });
+      });
+    }, delay);
+    entry.watchdogTimers.push(timer);
+  }
+}
+
+function describeSDP(sdp) {
+  return {
+    audio: /m=audio /.test(sdp),
+    video: /m=video /.test(sdp),
+    sendrecv: (sdp.match(/a=sendrecv/g) || []).length,
+    sendonly: (sdp.match(/a=sendonly/g) || []).length,
+    recvonly: (sdp.match(/a=recvonly/g) || []).length,
+    inactive: (sdp.match(/a=inactive/g) || []).length,
+  };
+}
+
+async function logPeerStats(peerID) {
+  const entry = peers.get(peerID);
+  if (!entry) return;
+
+  const reports = await entry.connection.getStats();
+  const summary = {
+    peerID,
+    localCandidateType: "",
+    remoteCandidateType: "",
+    selectedPairState: "",
+    inboundVideoPackets: 0,
+    inboundAudioPackets: 0,
+    outboundVideoPackets: 0,
+    outboundAudioPackets: 0,
+  };
+
+  for (const report of reports.values()) {
+    if (report.type === "candidate-pair" && (report.selected || report.nominated)) {
+      summary.selectedPairState = report.state || "";
+      const localCandidate = reports.get(report.localCandidateId);
+      const remoteCandidate = reports.get(report.remoteCandidateId);
+      summary.localCandidateType = localCandidate?.candidateType || "";
+      summary.remoteCandidateType = remoteCandidate?.candidateType || "";
+    }
+    if (report.type === "inbound-rtp" && report.kind === "video") summary.inboundVideoPackets += report.packetsReceived || 0;
+    if (report.type === "inbound-rtp" && report.kind === "audio") summary.inboundAudioPackets += report.packetsReceived || 0;
+    if (report.type === "outbound-rtp" && report.kind === "video") summary.outboundVideoPackets += report.packetsSent || 0;
+    if (report.type === "outbound-rtp" && report.kind === "audio") summary.outboundAudioPackets += report.packetsSent || 0;
+  }
+
+  logClientEvent("info", "peer-stats", summary);
 }

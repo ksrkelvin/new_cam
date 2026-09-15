@@ -1,10 +1,10 @@
 -- name: CreateRoom :one
-INSERT INTO rooms (code, owner_token)
-VALUES ($1, $2)
-RETURNING id, code, owner_token, last_empty_at, created_at;
+INSERT INTO rooms (code, name, owner_token)
+VALUES ($1, $2, $3)
+RETURNING id, code, name, owner_token, last_empty_at, created_at;
 
 -- name: FindRoomByCode :one
-SELECT id, code, owner_token, last_empty_at, created_at
+SELECT id, code, name, owner_token, last_empty_at, created_at
 FROM rooms
 WHERE code = $1;
 

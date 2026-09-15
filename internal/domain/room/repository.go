@@ -3,7 +3,7 @@ package room
 import "context"
 
 type Repository interface {
-	Create(ctx context.Context, code string, ownerToken string) (Room, error)
+	Create(ctx context.Context, code string, name string, ownerToken string) (Room, error)
 	FindByCode(ctx context.Context, code string) (Room, error)
 	Delete(ctx context.Context, code string) error
 	MarkOccupied(ctx context.Context, code string) error

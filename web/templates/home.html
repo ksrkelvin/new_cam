@@ -4,14 +4,21 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>We Cam</title>
-  <link rel="stylesheet" href="/static/css/app.css?v=20260913-5">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <link rel="stylesheet" href="/static/css/app.css?v=20260915-5">
 </head>
 <body>
   <main class="home-shell">
     <section class="home-panel">
-      <p class="eyebrow">We Cam</p>
-      <h1>Compartilhe sua camera em uma sala privada.</h1>
-      <p class="subtitle">Crie uma sala privada e compartilhe o link com quem voce quer chamar.</p>
+      <a href="/" class="brand home-brand" aria-label="We Cam">
+        <span class="brand-mark">W</span>
+        <span>
+          <strong>We Cam</strong>
+          <small>Salas privadas de video</small>
+        </span>
+      </a>
+      <h1>Crie sua sala.</h1>
+      <p class="subtitle">Defina um nome para a sala e compartilhe o link com quem voce quer chamar.</p>
 
       {{if .Error}}
       <p class="alert">{{.Error}}</p>
@@ -19,9 +26,10 @@
 
       <div class="actions-grid actions-grid-single">
         <form method="post" action="/rooms" class="action-card">
-          <h2>Nova sala</h2>
-          <p>Gera um link unico para compartilhar.</p>
-          <button type="submit">Criar sala</button>
+          <h2><i class="fa-solid fa-door-open" aria-hidden="true"></i> Nova sala</h2>
+          <label for="room-name">Nome da sala</label>
+          <input id="room-name" name="name" type="text" maxlength="80" autocomplete="off" placeholder="Ex: Crônicas de Aether" required>
+          <button type="submit"><i class="fa-solid fa-plus" aria-hidden="true"></i> Criar sala</button>
         </form>
       </div>
     </section>

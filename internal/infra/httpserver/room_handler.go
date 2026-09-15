@@ -24,7 +24,7 @@ func (h *RoomHandler) Home(ctx *gin.Context) {
 }
 
 func (h *RoomHandler) Create(ctx *gin.Context) {
-	createdRoom, err := h.service.Create(ctx.Request.Context())
+	createdRoom, err := h.service.Create(ctx.Request.Context(), ctx.PostForm("name"))
 	if err != nil {
 		slog.Error("create room failed", "error", err)
 		ctx.HTML(http.StatusInternalServerError, "home.html", gin.H{"Error": "Nao foi possivel criar a sala."})

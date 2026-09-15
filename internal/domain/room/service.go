@@ -22,9 +22,10 @@ func NewService(repository Repository) *Service {
 	return &Service{repository: repository}
 }
 
-func (s *Service) Create(ctx context.Context) (Room, error) {
+func (s *Service) Create(ctx context.Context, name string) (Room, error) {
+	normalizedName := NormalizeName(name)
 	for range 5 {
-		room, err := s.repository.Create(ctx, generateUUID(), generateToken())
+		room, err := s.repository.Create(ctx, generateUUID(), normalizedName, generateToken())
 		if err == nil {
 			return room, nil
 		}
@@ -79,6 +80,17 @@ func (s *Service) IsGuestApproved(ctx context.Context, roomCode string, guestTok
 
 func NormalizeCode(code string) string {
 	return strings.ToLower(strings.TrimSpace(code))
+}
+
+func NormalizeName(name string) string {
+	normalized := strings.TrimSpace(name)
+	if normalized == "" {
+		return "Sala sem nome"
+	}
+	if len([]rune(normalized)) > 80 {
+		return string([]rune(normalized)[:80])
+	}
+	return normalized
 }
 
 func generateUUID() string {
