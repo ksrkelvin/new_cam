@@ -17,7 +17,7 @@ run:
 
 db-up:
 	docker compose up -d postgres
-23511111111cghnj
+
 db-down:
 	docker compose down
 

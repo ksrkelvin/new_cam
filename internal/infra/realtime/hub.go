@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 
@@ -32,6 +33,15 @@ type RoomActivity interface {
 type liveRoom struct {
 	participants map[*Client]struct{}
 	pending      map[*Client]struct{}
+	music        musicState
+}
+
+type musicState struct {
+	VideoID   string  `json:"videoId"`
+	Playing   bool    `json:"playing"`
+	Position  float64 `json:"position"`
+	UpdatedAt int64   `json:"updatedAt"`
+	Revision  int64   `json:"revision"`
 }
 
 type signalMessage struct {
@@ -80,6 +90,7 @@ func (h *Hub) Serve(writer http.ResponseWriter, request *http.Request, roomCode 
 			"owner": client.isOwner,
 			"peers": h.peerInfos(roomCode),
 			"name":  clientName(client),
+			"music": h.musicState(roomCode),
 		})})
 	} else {
 		_ = client.send(signalMessage{Type: "waiting", From: client.id})
@@ -196,7 +207,14 @@ func (h *Hub) handle(client *Client, message signalMessage) {
 		case "kick":
 			h.kickLocked(client, message.To)
 			return
+		case "music-set", "music-play", "music-pause", "music-seek":
+			h.handleMusicLocked(client, message)
+			return
 		}
+	}
+
+	if message.Type == "music-set" || message.Type == "music-play" || message.Type == "music-pause" || message.Type == "music-seek" {
+		return
 	}
 
 	if client.isApproved && message.Type == "participant-info" {
@@ -243,6 +261,7 @@ func (h *Hub) approveLocked(owner *Client, pendingID string) {
 		_ = pendingClient.send(signalMessage{Type: "approved", From: pendingClient.id, Peers: peers, Data: mustJSON(map[string]any{
 			"peers": h.peerInfosLocked(room, pendingClient),
 			"name":  clientName(pendingClient),
+			"music": h.musicStatePayloadLocked(room),
 		})})
 		h.broadcast(pendingClient, signalMessage{Type: "peer-joined", From: pendingClient.id, Data: mustJSON(map[string]any{"name": clientName(pendingClient)})})
 		h.sendPendingListLocked(owner.roomCode)
@@ -282,6 +301,78 @@ func (h *Hub) kickLocked(owner *Client, clientID string) {
 	}
 }
 
+func (h *Hub) handleMusicLocked(owner *Client, message signalMessage) {
+	room := h.rooms[owner.roomCode]
+	if room == nil {
+		return
+	}
+
+	state := h.musicStatePayloadLocked(room)
+	switch message.Type {
+	case "music-set":
+		videoID := stringFromJSON(message.Data, "videoId")
+		if !validYouTubeVideoID(videoID) {
+			return
+		}
+		state.VideoID = videoID
+		state.Playing = true
+		state.Position = 0
+	case "music-play":
+		if state.VideoID == "" {
+			return
+		}
+		state.Position = positionFromJSON(message.Data, state.Position)
+		state.Playing = true
+	case "music-pause":
+		if state.VideoID == "" {
+			return
+		}
+		state.Position = positionFromJSON(message.Data, state.Position)
+		state.Playing = false
+	case "music-seek":
+		if state.VideoID == "" {
+			return
+		}
+		state.Position = positionFromJSON(message.Data, state.Position)
+	}
+
+	if state.Position < 0 {
+		state.Position = 0
+	}
+	state.UpdatedAt = time.Now().UnixMilli()
+	state.Revision++
+	room.music = state
+	h.broadcastMusicLocked(room)
+}
+
+func (h *Hub) broadcastMusicLocked(room *liveRoom) {
+	state := h.musicStatePayloadLocked(room)
+	for client := range room.participants {
+		_ = client.send(signalMessage{Type: "music-state", Data: mustJSON(state)})
+	}
+}
+
+func (h *Hub) musicState(roomCode string) musicState {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	room := h.rooms[roomCode]
+	if room == nil {
+		return musicState{}
+	}
+	return h.musicStatePayloadLocked(room)
+}
+
+func (h *Hub) musicStatePayloadLocked(room *liveRoom) musicState {
+	state := room.music
+	if state.Playing && state.UpdatedAt > 0 {
+		now := time.Now().UnixMilli()
+		state.Position += float64(now-state.UpdatedAt) / 1000
+		state.UpdatedAt = now
+	}
+	return state
+}
+
 func (h *Hub) sendPendingListLocked(roomCode string) {
 	room := h.rooms[roomCode]
 	if room == nil {
@@ -313,6 +404,40 @@ func stringFromJSON(data json.RawMessage, key string) string {
 		return ""
 	}
 	return payload[key]
+}
+
+func positionFromJSON(data json.RawMessage, fallback float64) float64 {
+	var payload map[string]float64
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return fallback
+	}
+	position, ok := payload["position"]
+	if !ok {
+		return fallback
+	}
+	return position
+}
+
+func validYouTubeVideoID(videoID string) bool {
+	if len(videoID) != 11 {
+		return false
+	}
+	for _, character := range videoID {
+		if character >= 'a' && character <= 'z' {
+			continue
+		}
+		if character >= 'A' && character <= 'Z' {
+			continue
+		}
+		if character >= '0' && character <= '9' {
+			continue
+		}
+		if character == '_' || character == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func clientName(client *Client) string {

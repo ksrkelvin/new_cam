@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sala {{.Room.Code}} | We Cam</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-  <link rel="stylesheet" href="/static/css/app.css?v=20260915-8">
+  <link rel="stylesheet" href="/static/css/app.css?v=20260915-14">
 </head>
 <body data-room-code="{{.Room.Code}}" data-is-owner="{{.IsOwner}}">
   <main class="room-shell">
@@ -49,8 +49,62 @@
         </div>
       </section>
 
-      {{if .IsOwner}}
       <aside class="table-sidebar" aria-label="Gerenciamento da sala">
+        <section class="sidebar-card table-tools" aria-label="Ferramentas da mesa">
+          <h2>
+            <span><i class="fa-solid fa-wand-sparkles" aria-hidden="true"></i></span>
+            Ferramentas da Mesa
+          </h2>
+          <div class="tool-tabs" role="tablist" aria-label="Ferramentas">
+            <button type="button" class="tool-tab is-active" role="tab" aria-selected="true">
+              <i class="fa-solid fa-music" aria-hidden="true"></i>
+              <span>Música</span>
+            </button>
+          </div>
+        </section>
+        <section class="sidebar-card music-panel" id="music-panel">
+          <h2>
+            <span><i class="fa-solid fa-music" aria-hidden="true"></i></span>
+            Música da mesa
+          </h2>
+          {{if .IsOwner}}
+          <form id="music-form" class="music-form">
+            <input id="music-url" type="url" placeholder="URL do YouTube" autocomplete="off">
+            <button type="submit" aria-label="Buscar música"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></button>
+          </form>
+          {{else}}
+          <p id="music-role-note" class="music-note">Aguardando música do criador.</p>
+          {{end}}
+          <div class="music-now">
+            <div id="youtube-player" class="youtube-player" aria-hidden="true"></div>
+            {{if .IsOwner}}
+            <button type="button" id="music-play-pause" class="music-play-button" aria-label="Play ou pause"><i class="fa-solid fa-play" aria-hidden="true"></i></button>
+            {{else}}
+            <span class="music-player-icon"><i class="fa-solid fa-music" aria-hidden="true"></i></span>
+            {{end}}
+            <div class="music-player-main">
+              <div class="music-player-row">
+                <strong id="music-title">Sem música</strong>
+                <span id="music-time">0:00 / 0:00</span>
+              </div>
+              {{if .IsOwner}}
+              <input id="music-seek" class="music-seek-slider" type="range" min="0" max="0" value="0" step="1" aria-label="Posição da música">
+              {{else}}
+              <div class="music-progress-track" aria-hidden="true">
+                <span id="music-progress-bar"></span>
+              </div>
+              {{end}}
+              <span id="music-status" class="music-status">Parada</span>
+            </div>
+            <div id="music-volume-bars" class="music-eq" role="slider" tabindex="0" aria-label="Volume local da música" aria-valuemin="0" aria-valuemax="100" aria-valuenow="60">
+              <span></span><span></span><span></span><span></span><span></span><span></span>
+            </div>
+            <button type="button" id="music-loop" class="music-loop-button" aria-label="Ligar repetição"><i class="fa-solid fa-repeat" aria-hidden="true"></i></button>
+            <button type="button" id="music-mute" class="music-mute-button" aria-label="Mutar música"><i class="fa-solid fa-volume-high" aria-hidden="true"></i></button>
+          </div>
+          <button type="button" id="music-enable" class="secondary-button music-enable" hidden>Ativar música da mesa</button>
+        </section>
+        {{if .IsOwner}}
         <section class="sidebar-card owner-panel is-open" id="owner-panel" aria-hidden="false">
           <h2>
             <span><i class="fa-solid fa-users" aria-hidden="true"></i></span>
@@ -63,8 +117,8 @@
           </h2>
           <div id="pending-list" class="pending-list"></div>
         </section>
+        {{end}}
       </aside>
-      {{end}}
     </div>
 
     <footer class="controls">
@@ -89,6 +143,7 @@
       </div>
     </section>
   </main>
-  <script src="/static/js/room.js?v=20260915-8"></script>
+  <script src="/static/js/room.js?v=20260915-14"></script>
+  <script src="https://www.youtube.com/iframe_api"></script>
 </body>
 </html>
