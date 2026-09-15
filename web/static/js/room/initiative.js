@@ -1,9 +1,9 @@
-export function createInitiative({ dom, isOwner, send }) {
+export function createInitiative({ dom, isOwner, send, getParticipantNames = () => [] }) {
   let entries = [];
   let turn = 0;
 
   function applyInitiativeState(state) {
-    entries = Array.isArray(state?.entries) ? state.entries : [];
+    entries = Array.isArray(state?.entries) ? state.entries.slice().sort((a, b) => Number(b.score || 0) - Number(a.score || 0)) : [];
     turn = Number(state?.turn || 0);
     render();
   }
@@ -52,20 +52,24 @@ export function createInitiative({ dom, isOwner, send }) {
   }
 
   function renderBanner() {
-    if (!dom.initiativeBanner) return;
-    dom.initiativeBanner.replaceChildren();
-    dom.initiativeBanner.hidden = entries.length === 0;
+    renderTokens(dom.initiativeBanner, true);
+    renderTokens(dom.initiativeTokenList, false);
+  }
+
+  function renderTokens(container, hideWhenEmpty) {
+    if (!container) return;
+    container.replaceChildren();
+    if (hideWhenEmpty) container.hidden = entries.length === 0;
+    if (container === dom.initiativeBanner && dom.initiativePassTop) dom.initiativePassTop.hidden = entries.length === 0;
     if (entries.length === 0) return;
 
     const normalizedTurn = ((turn % entries.length) + entries.length) % entries.length;
-    const orderedEntries = entries.slice(normalizedTurn).concat(entries.slice(0, normalizedTurn));
-
-    orderedEntries.forEach((entry, index) => {
+    entries.forEach((entry, index) => {
       const token = document.createElement("span");
       token.className = "initiative-token";
-      if (index === 0) token.classList.add("is-current");
+      if (index === normalizedTurn) token.classList.add("is-current");
       token.title = `${entry.name || "Sem nome"} (${entry.score ?? 0})`;
-      token.setAttribute("aria-label", `${index === 0 ? "Turno atual: " : ""}${entry.name || "Sem nome"}, iniciativa ${entry.score ?? 0}`);
+      token.setAttribute("aria-label", `${index === normalizedTurn ? "Turno atual: " : ""}${entry.name || "Sem nome"}, iniciativa ${entry.score ?? 0}`);
 
       const initials = document.createElement("span");
       initials.className = "initiative-token-initials";
@@ -75,11 +79,13 @@ export function createInitiative({ dom, isOwner, send }) {
       score.textContent = String(entry.score ?? 0);
 
       token.append(initials, score);
-      dom.initiativeBanner.append(token);
+      container.append(token);
     });
   }
 
   function bindEvents() {
+    dom.initiativeName?.addEventListener("focus", renderNameOptions);
+    dom.initiativeName?.addEventListener("pointerdown", renderNameOptions);
     dom.initiativeForm?.addEventListener("submit", (event) => {
       event.preventDefault();
       const name = dom.initiativeName?.value.trim() || "";
@@ -91,6 +97,20 @@ export function createInitiative({ dom, isOwner, send }) {
       dom.initiativeName.focus();
     });
     dom.initiativePass?.addEventListener("click", () => send("initiative-pass", "", {}));
+    dom.initiativePassTop?.addEventListener("click", () => send("initiative-pass", "", {}));
+  }
+
+  function renderNameOptions() {
+    if (!dom.initiativeNameOptions) return;
+    const currentEntries = new Set(entries.map((entry) => (entry.name || "").toLowerCase()));
+    const names = Array.from(new Set(getParticipantNames().map((name) => name.trim()).filter(Boolean)));
+    dom.initiativeNameOptions.replaceChildren();
+    for (const name of names) {
+      if (currentEntries.has(name.toLowerCase())) continue;
+      const option = document.createElement("option");
+      option.value = name;
+      dom.initiativeNameOptions.append(option);
+    }
   }
 
   return { applyInitiativeState, bindEvents };

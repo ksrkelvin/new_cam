@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="apple-touch-icon" href="/favicon.png">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-  <link rel="stylesheet" href="/static/css/app.css?v=20260915-48">
+  <link rel="stylesheet" href="/static/css/app.css?v=20260915-53">
 </head>
 <body data-room-code="{{.Room.Code}}" data-is-owner="{{.IsOwner}}">
   <main class="room-shell">
@@ -19,7 +19,14 @@
           <small>Tavernia &bull; Sala privada</small>
         </span>
       </a>
-      <div id="initiative-banner" class="initiative-banner" hidden aria-live="polite" aria-label="Ordem de iniciativa"></div>
+      <div class="initiative-banner-wrap">
+        <div id="initiative-banner" class="initiative-banner" hidden aria-live="polite" aria-label="Ordem de iniciativa"></div>
+        {{if .IsOwner}}
+        <button type="button" id="initiative-pass-top" class="initiative-pass-top" hidden aria-label="Passar turno">
+          <i class="fa-solid fa-forward-step" aria-hidden="true"></i>
+        </button>
+        {{end}}
+      </div>
       {{if .IsOwner}}
       <div id="entry-alert" class="entry-alert" hidden role="status" aria-live="polite">
         <i class="fa-solid fa-user-clock" aria-hidden="true"></i>
@@ -161,7 +168,8 @@
           </h2>
           {{if .IsOwner}}
           <form id="initiative-form" class="initiative-form">
-            <input id="initiative-name" type="text" maxlength="40" placeholder="Nome" autocomplete="off" aria-label="Nome na iniciativa">
+            <input id="initiative-name" type="text" maxlength="40" placeholder="Nome" autocomplete="off" list="initiative-name-options" aria-label="Nome na iniciativa">
+            <datalist id="initiative-name-options"></datalist>
             <input id="initiative-score" type="number" min="-100" max="200" placeholder="Valor" inputmode="numeric" aria-label="Valor da iniciativa">
             <button type="submit" aria-label="Adicionar iniciativa"><i class="fa-solid fa-plus" aria-hidden="true"></i></button>
           </form>
@@ -170,6 +178,7 @@
             <span>Passar turno</span>
           </button>
           {{end}}
+          <div id="initiative-token-list" class="initiative-token-list" aria-label="Ordem de iniciativa"></div>
           <div id="initiative-list" class="initiative-list" aria-live="polite"></div>
         </section>
         {{if .IsOwner}}
@@ -243,6 +252,6 @@
       </div>
     </section>
   </main>
-  <script type="module" src="/static/js/room.js?v=20260915-48"></script>
+  <script type="module" src="/static/js/room.js?v=20260915-53"></script>
 </body>
 </html>

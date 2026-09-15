@@ -1,7 +1,7 @@
 import { createDice } from "./room/dice.js";
-import { dom } from "./room/dom.js";
+import { dom } from "./room/dom.js?v=20260915-52";
 import { getOrCreateClientLogID, getOrCreateGuestToken, guestNameKey } from "./room/identity.js";
-import { createInitiative } from "./room/initiative.js";
+import { createInitiative } from "./room/initiative.js?v=20260915-52";
 import { connectionInfo, createLogger } from "./room/logger.js";
 import { createLocalMedia, updateMicStatus } from "./room/media.js?v=20260915-48";
 import { createMusic } from "./room/music.js";
@@ -9,7 +9,7 @@ import { createParticipants } from "./room/participants.js";
 import { createPeerManager } from "./room/peers.js?v=20260915-48";
 
 const maxParticipants = 10;
-const appVersion = "20260915-48";
+const appVersion = "20260915-53";
 const roomCode = document.body.dataset.roomCode;
 const isOwner = document.body.dataset.isOwner === "true";
 const guestToken = isOwner ? "" : getOrCreateGuestToken(roomCode);
@@ -72,7 +72,15 @@ peerManager = createPeerManager({
 });
 
 const dice = createDice({ dom, send });
-const initiative = createInitiative({ dom, isOwner, send });
+const initiative = createInitiative({
+  dom,
+  isOwner,
+  send,
+  getParticipantNames: () => {
+    const names = Array.from(peerNames.values()).filter(Boolean);
+    return isOwner ? ["Criador", ...names] : names;
+  },
+});
 const music = createMusic({ dom, isOwner, send, logClientEvent });
 music.installYouTubeCallback();
 

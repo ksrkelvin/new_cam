@@ -1006,6 +1006,15 @@ body:has(.home-shell) {
   gap: 10px;
 }
 
+.initiative-banner-wrap {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: 1 1 auto;
+}
+
 .initiative-banner {
   min-width: 0;
   max-width: min(430px, 34vw);
@@ -1024,6 +1033,24 @@ body:has(.home-shell) {
 }
 
 .initiative-banner[hidden] {
+  display: none;
+}
+
+.initiative-pass-top {
+  width: 46px;
+  min-width: 46px;
+  min-height: 46px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(22, 224, 138, 0.32);
+  border-radius: 50%;
+  padding: 0;
+  color: #061016;
+  background: #16e08a;
+  box-shadow: 0 0 24px rgba(22, 224, 138, 0.2);
+}
+
+.initiative-pass-top[hidden] {
   display: none;
 }
 
@@ -1456,6 +1483,33 @@ body:has(.home-shell) {
 .initiative-list {
   display: grid;
   gap: 8px;
+}
+
+.initiative-token-list {
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0;
+  overflow-x: auto;
+  padding: 6px 4px 10px;
+  scrollbar-width: none;
+}
+
+.initiative-token-list::-webkit-scrollbar {
+  display: none;
+}
+
+.initiative-token-list .initiative-token {
+  width: 56px;
+  height: 56px;
+  flex-basis: 56px;
+}
+
+.initiative-token-list .initiative-token b {
+  min-width: 23px;
+  height: 23px;
+  font-size: 0.7rem;
 }
 
 .initiative-empty {
@@ -2124,10 +2178,14 @@ body:has(.home-shell) {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 42px;
   }
 
-  .initiative-banner {
+  .initiative-banner-wrap {
     width: 100%;
-    max-width: none;
     order: 3;
+  }
+
+  .initiative-banner {
+    flex: 1 1 auto;
+    max-width: none;
     justify-content: flex-start;
     overflow-x: auto;
     padding: 6px 10px;
