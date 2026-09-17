@@ -9,7 +9,7 @@ import { createParticipants } from "./room/participants.js";
 import { createPeerManager } from "./room/peers.js?v=20260915-48";
 
 const maxParticipants = 10;
-const appVersion = "20260915-53";
+const appVersion = "20260915-54";
 const roomCode = document.body.dataset.roomCode;
 const isOwner = document.body.dataset.isOwner === "true";
 const guestToken = isOwner ? "" : getOrCreateGuestToken(roomCode);

@@ -1054,6 +1054,10 @@ body:has(.home-shell) {
   display: none;
 }
 
+.initiative-banner-wrap:has(.initiative-banner[hidden]) {
+  display: none;
+}
+
 .initiative-token {
   position: relative;
   width: 46px;
@@ -2077,6 +2081,21 @@ body:has(.home-shell) {
 }
 
 @media (max-width: 1080px) {
+  .room-header {
+    flex-wrap: wrap;
+    height: auto;
+  }
+
+  .initiative-banner-wrap {
+    flex: 1 1 100%;
+    order: 3;
+  }
+
+  .initiative-banner {
+    max-width: min(100%, 620px);
+    margin-inline: auto;
+  }
+
   .room-shell {
     grid-template-rows: auto minmax(0, 1fr) auto;
     overflow: auto;
@@ -2148,15 +2167,18 @@ body:has(.home-shell) {
     display: grid;
     grid-template-columns: 1fr;
     padding: max(10px, env(safe-area-inset-top)) 10px 10px;
+    gap: 8px;
   }
 
   .brand {
     min-width: 0;
+    order: 1;
   }
 
   .header-actions {
     width: 100%;
-    flex-wrap: nowrap;
+    order: 3;
+    flex-wrap: wrap;
     margin-left: 0;
   }
 
@@ -2180,16 +2202,24 @@ body:has(.home-shell) {
 
   .initiative-banner-wrap {
     width: 100%;
-    order: 3;
+    order: 2;
+    justify-content: center;
   }
 
   .initiative-banner {
-    flex: 1 1 auto;
-    max-width: none;
-    justify-content: flex-start;
+    flex: 0 1 auto;
+    width: min(100%, 430px);
+    max-width: calc(100vw - 76px);
+    justify-content: center;
     overflow-x: auto;
     padding: 6px 10px;
     scrollbar-width: none;
+  }
+
+  .initiative-pass-top {
+    width: 42px;
+    min-width: 42px;
+    min-height: 42px;
   }
 
   .initiative-banner::-webkit-scrollbar {
