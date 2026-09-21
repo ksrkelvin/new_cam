@@ -9,7 +9,7 @@ export function createPeerManager({ peerConfig, knownPeers, peerVolumes, createT
     if (peers.has(peerID)) return peers.get(peerID);
     if (!knownPeers.has(peerID)) return null;
 
-    const localStream = getLocalStream();
+    const localStream = getLocalStream() || new MediaStream();
     const queuedCandidates = pendingCandidatesByPeer.get(peerID) || [];
     const entry = {
       connection: null,
@@ -49,7 +49,7 @@ export function createPeerManager({ peerConfig, knownPeers, peerVolumes, createT
 
   function createMediaConnection(peerID, entry) {
     const connection = new RTCPeerConnection(peerConfig);
-    const localStream = getLocalStream();
+    const localStream = getLocalStream() || new MediaStream();
     addLocalMedia(connection, localStream);
 
     connection.ontrack = (event) => {

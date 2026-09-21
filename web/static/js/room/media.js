@@ -21,6 +21,17 @@ export function createLocalMedia({ dom, logClientEvent, sendMediaState, replaceL
     return localMediaPromise;
   }
 
+  function ensureEmptyMedia() {
+    if (!localStream) {
+      localStream = new MediaStream();
+      micEnabled = false;
+      cameraEnabled = false;
+      dom.localVideo.srcObject = localStream;
+      dom.lobbyVideo.srcObject = localStream;
+    }
+    return localStream;
+  }
+
   async function openLocalMedia() {
     if (!navigator.mediaDevices?.getUserMedia) {
       const error = new Error("getUserMedia indisponivel");
@@ -340,6 +351,7 @@ export function createLocalMedia({ dom, logClientEvent, sendMediaState, replaceL
     setMicEnabled,
     showMediaProblem,
     stop,
+    ensureEmptyMedia,
   };
 }
 

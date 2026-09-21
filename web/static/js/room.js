@@ -3,13 +3,13 @@ import { dom } from "./room/dom.js?v=20260915-52";
 import { getOrCreateClientLogID, getOrCreateGuestToken, guestNameKey } from "./room/identity.js";
 import { createInitiative } from "./room/initiative.js?v=20260915-52";
 import { connectionInfo, createLogger } from "./room/logger.js";
-import { createLocalMedia, updateMicStatus } from "./room/media.js?v=20260915-48";
+import { createLocalMedia, updateMicStatus } from "./room/media.js?v=20260921-01";
 import { createMusic } from "./room/music.js";
 import { createParticipants } from "./room/participants.js";
-import { createPeerManager } from "./room/peers.js?v=20260915-48";
+import { createPeerManager } from "./room/peers.js?v=20260921-01";
 
 const maxParticipants = 10;
-const appVersion = "20260915-54";
+const appVersion = "20260921-01";
 const roomCode = document.body.dataset.roomCode;
 const isOwner = document.body.dataset.isOwner === "true";
 const guestToken = isOwner ? "" : getOrCreateGuestToken(roomCode);
@@ -129,7 +129,7 @@ async function handleSignalMessage(message) {
   if (message.type === "waiting") {
     selfID = message.from;
     dom.lobbyStatus.textContent = "Confira seus dispositivos e aperte entrar.";
-    await localMedia.ensureMedia();
+    await ensureMediaForRoom("waiting-media-error");
     return;
   }
   if (message.type === "ready" || message.type === "approved") {
@@ -145,7 +145,7 @@ async function handleSignalMessage(message) {
     for (const peerID of message.peers || []) knownPeers.add(peerID);
     participants.rememberPeerNames(message.data?.peers || []);
     participants.renderParticipants();
-    await localMedia.ensureMedia();
+    await ensureMediaForRoom("ready-media-error");
     dom.localVideo.srcObject = localMedia.getLocalStream();
     dom.localState.textContent = localDisplayName();
     updateMicStatus(dom.localMicStatus, localMedia.isMicEnabled());
@@ -193,7 +193,7 @@ async function handleSignalMessage(message) {
     participants.rememberPeerName(message.from, message.data?.name);
     participants.updateGrid(approved);
     participants.renderParticipants();
-    await localMedia.ensureMedia();
+    await ensureMediaForRoom("peer-joined-media-error");
     await peerManager.createPeer(message.from, false);
     send("media-state", message.from, { micEnabled: localMedia.isMicEnabled() });
     return;
@@ -216,7 +216,7 @@ async function handleSignalMessage(message) {
   }
   if (message.type === "offer") {
     knownPeers.add(message.from);
-    await localMedia.ensureMedia();
+    await ensureMediaForRoom("offer-media-error");
     await peerManager.handleOffer(message);
     return;
   }
@@ -278,7 +278,7 @@ function refreshDevices() {
 
 async function requestEntry() {
   try {
-    await localMedia.ensureMedia();
+    await ensureMediaForRoom("request-entry-media-error");
     const name = dom.guestName.value.trim() || "Convidado";
     localStorage.setItem(guestStorageKey, name);
     await waitForSocketOpen();
@@ -288,6 +288,16 @@ async function requestEntry() {
   } catch (error) {
     logClientEvent("error", "request-entry-media-error", { name: error.name, message: error.message });
     localMedia.showMediaProblem(error);
+  }
+}
+
+async function ensureMediaForRoom(eventName) {
+  try {
+    return await localMedia.ensureMedia();
+  } catch (error) {
+    logClientEvent("warn", eventName, { name: error.name, message: error.message });
+    localMedia.showMediaProblem(error);
+    return localMedia.ensureEmptyMedia();
   }
 }
 
