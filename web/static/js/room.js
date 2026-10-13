@@ -1,5 +1,5 @@
 import { createDice } from "./room/dice.js";
-import { dom } from "./room/dom.js?v=20260915-52";
+import { dom } from "./room/dom.js?v=20261013-55";
 import { getOrCreateClientLogID, getOrCreateGuestToken, guestNameKey } from "./room/identity.js";
 import { createInitiative } from "./room/initiative.js?v=20260915-52";
 import { connectionInfo, createLogger } from "./room/logger.js";
@@ -14,6 +14,7 @@ const roomCode = document.body.dataset.roomCode;
 const isOwner = document.body.dataset.isOwner === "true";
 const guestToken = isOwner ? "" : getOrCreateGuestToken(roomCode);
 const guestStorageKey = guestNameKey(roomCode);
+const sidebarStorageKey = "tavernia-sidebar-collapsed";
 const clientLogID = getOrCreateClientLogID();
 const logClientEvent = createLogger({ roomCode, clientLogID });
 
@@ -23,7 +24,7 @@ if (guestToken) socketURL.searchParams.set("guest_token", guestToken);
 const socket = new WebSocket(socketURL);
 
 const peerConfig = {
-  iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+  iceServers: parseIceServers(),
   iceCandidatePoolSize: 4,
 };
 
@@ -86,6 +87,16 @@ music.installYouTubeCallback();
 
 logClientEvent("info", "room-script-loaded", { version: appVersion, isOwner, roomCode, connection: connectionInfo() });
 logClientEvent("info", "ice-config", { iceServers: peerConfig.iceServers.map((server) => ({ urls: server.urls })) });
+
+function parseIceServers() {
+  try {
+    const servers = JSON.parse(document.body.dataset.iceServers || "[]");
+    if (Array.isArray(servers) && servers.length > 0) return servers;
+  } catch (error) {
+    console.warn("ICE config invalida", error);
+  }
+  return [{ urls: "stun:stun.l.google.com:19302" }];
+}
 
 if (!isOwner) {
   dom.lobby.hidden = false;
@@ -237,6 +248,7 @@ function selectTool(toolName) {
 }
 
 function bindEvents() {
+  bindSidebarToggle();
   for (const tab of dom.toolTabs) tab.addEventListener("click", () => selectTool(tab.dataset.toolTab));
   dice.bindEvents();
   initiative.bindEvents();
@@ -258,6 +270,25 @@ function bindEvents() {
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) refreshDevices();
   });
+}
+
+function bindSidebarToggle() {
+  if (!dom.toggleSidebar || !dom.tableSidebar) return;
+  const collapsed = localStorage.getItem(sidebarStorageKey) === "true";
+  setSidebarCollapsed(collapsed);
+  dom.toggleSidebar.addEventListener("click", () => {
+    const nextCollapsed = !dom.tableSidebar.classList.contains("is-collapsed");
+    setSidebarCollapsed(nextCollapsed);
+    localStorage.setItem(sidebarStorageKey, String(nextCollapsed));
+  });
+}
+
+function setSidebarCollapsed(collapsed) {
+  dom.tableSidebar.classList.toggle("is-collapsed", collapsed);
+  dom.toggleSidebar.setAttribute("aria-expanded", String(!collapsed));
+  const label = collapsed ? "Expandir sidebar" : "Recolher sidebar";
+  dom.toggleSidebar.setAttribute("aria-label", label);
+  dom.toggleSidebar.setAttribute("title", label);
 }
 
 function deviceSelects(kind) {

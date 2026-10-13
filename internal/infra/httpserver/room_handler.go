@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -9,14 +10,16 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"we_cam/internal/domain/room"
+	"we_cam/internal/infra/config"
 )
 
 type RoomHandler struct {
-	service *room.Service
+	service        *room.Service
+	iceServersJSON string
 }
 
-func NewRoomHandler(service *room.Service) *RoomHandler {
-	return &RoomHandler{service: service}
+func NewRoomHandler(service *room.Service, cfg config.Config) *RoomHandler {
+	return &RoomHandler{service: service, iceServersJSON: normalizedICEServersJSON(cfg.ICEServersJSON)}
 }
 
 func (h *RoomHandler) Home(ctx *gin.Context) {
@@ -61,9 +64,24 @@ func (h *RoomHandler) Show(ctx *gin.Context) {
 	}
 	ownerToken, _ := ctx.Cookie(ownerCookieName(joinedRoom.Code))
 	ctx.HTML(http.StatusOK, "room.html", gin.H{
-		"Room":    joinedRoom,
-		"IsOwner": ownerToken == joinedRoom.OwnerToken,
+		"Room":           joinedRoom,
+		"IsOwner":        ownerToken == joinedRoom.OwnerToken,
+		"ICEServersJSON": h.iceServersJSON,
 	})
+}
+
+func normalizedICEServersJSON(rawJSON string) string {
+	var servers []map[string]any
+	if err := json.Unmarshal([]byte(rawJSON), &servers); err != nil || len(servers) == 0 {
+		slog.Warn("invalid ICE_SERVERS_JSON, using default STUN", "error", err)
+		return `[{"urls":"stun:stun.l.google.com:19302"}]`
+	}
+	normalized, err := json.Marshal(servers)
+	if err != nil {
+		slog.Warn("marshal ICE_SERVERS_JSON failed, using default STUN", "error", err)
+		return `[{"urls":"stun:stun.l.google.com:19302"}]`
+	}
+	return string(normalized)
 }
 
 func setOwnerCookie(ctx *gin.Context, roomCode string, ownerToken string) {

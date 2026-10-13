@@ -10,6 +10,8 @@ export const dom = {
   toggleCamera: document.querySelector("#toggle-camera"),
   toggleMic: document.querySelector("#toggle-mic"),
   shareRoom: document.querySelector("#share-room"),
+  toggleSidebar: document.querySelector("#toggle-sidebar"),
+  tableSidebar: document.querySelector(".table-sidebar"),
   leaveRoom: document.querySelector("#leave-room"),
   ownerPanel: document.querySelector("#owner-panel"),
   toolTabs: document.querySelectorAll("[data-tool-tab]"),

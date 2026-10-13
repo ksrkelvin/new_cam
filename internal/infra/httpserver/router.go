@@ -38,7 +38,7 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 	router.POST("/client-logs", ClientLog)
 
 	roomService := room.NewService(database.NewRoomRepository(pool))
-	handler := NewRoomHandler(roomService)
+	handler := NewRoomHandler(roomService, cfg)
 	hub := realtime.NewHub(roomService)
 
 	router.GET("/", handler.Home)

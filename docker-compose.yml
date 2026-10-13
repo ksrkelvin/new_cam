@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "127.0.0.1:15432:5432"
+      - "127.0.0.1:15433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -25,6 +25,7 @@ services:
       HTTP_ADDR: ${HTTP_ADDR}
       DATABASE_URL: ${DOCKER_DATABASE_URL}
       LOG_LEVEL: ${LOG_LEVEL}
+      ICE_SERVERS_JSON: '${ICE_SERVERS_JSON:-[{"urls":"stun:stun.l.google.com:19302"}]}'
     ports:
       - "8080:8080"
     depends_on:

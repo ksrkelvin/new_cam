@@ -7,9 +7,9 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="apple-touch-icon" href="/favicon.png">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-  <link rel="stylesheet" href="/static/css/app.css?v=20260915-54">
+  <link rel="stylesheet" href="/static/css/app.css?v=20261013-55">
 </head>
-<body data-room-code="{{.Room.Code}}" data-is-owner="{{.IsOwner}}">
+<body data-room-code="{{.Room.Code}}" data-is-owner="{{.IsOwner}}" data-ice-servers='{{.ICEServersJSON}}'>
   <main class="room-shell">
     <header class="room-header">
       <a href="/" class="brand" aria-label="Tavernia">
@@ -66,6 +66,10 @@
       </section>
 
       <aside class="table-sidebar" aria-label="Gerenciamento da sala">
+        <button type="button" id="toggle-sidebar" class="sidebar-toggle" aria-expanded="true" aria-controls="table-sidebar-content" aria-label="Recolher sidebar" title="Recolher sidebar">
+          <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+        </button>
+        <div id="table-sidebar-content" class="sidebar-content">
         <section class="sidebar-card table-tools" aria-label="Ferramentas da mesa">
           <h2>
             <span><i class="fa-solid fa-wand-sparkles" aria-hidden="true"></i></span>
@@ -195,6 +199,7 @@
           <div id="pending-list" class="pending-list"></div>
         </section>
         {{end}}
+        </div>
       </aside>
     </div>
 

@@ -44,6 +44,16 @@ Eventos do navegador, WebSocket, permissao de camera/microfone e estados WebRTC 
 docker compose logs -f app
 ```
 
+## WebRTC em redes restritas
+
+Por padrao a aplicacao usa apenas STUN. Se alguns usuarios trocam `offer/answer/candidate`, mas ficam em `checking` ou `failed`, configure um servidor TURN:
+
+```bash
+ICE_SERVERS_JSON='[{"urls":"stun:stun.l.google.com:19302"},{"urls":"turn:turn.example.com:3478","username":"usuario","credential":"senha"}]'
+```
+
+Em Docker, coloque essa variavel no `.env` e reinicie o `app`.
+
 ## Estrutura
 
 - `cmd/wecam`: entrada da aplicacao.
